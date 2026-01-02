@@ -161,6 +161,7 @@ public class TerminalHolder extends Page implements AutoCloseable {
         SessionInfo info = sessionContentPanel.getInfo();
         java.util.List<String> command = new java.util.ArrayList<>();
         command.add("kitty");
+        command.add("--hold");
         command.add("ssh");
         if (info.getPrivateKeyFile() != null && !info.getPrivateKeyFile().isEmpty()) {
             command.add("-i");
