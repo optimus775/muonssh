@@ -44,6 +44,15 @@ public class TerminalHolder extends Page implements AutoCloseable {
         btn.setForeground(App.getCONTEXT().getSkin().getInfoTextForeground());
         tabs.getButtonsBox().add(btn);
 
+        JButton btnExternal = new JButton();
+        btnExternal.setToolTipText("Open in External Terminal (Kitty)");
+        btnExternal.addActionListener(e -> openExternalTerminal());
+        btnExternal.setFont(App.getCONTEXT().getSkin().getIconFont(SMALL_TEXT_SIZE));
+        btnExternal.setText(FontAwesomeContants.FA_EXTERNAL_LINK);
+        btnExternal.putClientProperty("Nimbus.Overrides", App.getCONTEXT().getSkin().createTabButtonSkin());
+        btnExternal.setForeground(App.getCONTEXT().getSkin().getInfoTextForeground());
+        tabs.getButtonsBox().add(btnExternal);
+
         long t1 = System.currentTimeMillis();
         TerminalComponent tc = new TerminalComponent(info, c + "", null, pSessionContentPanel);
         this.tabs.addTab(tc.getTabTitle(), tc);
@@ -114,7 +123,7 @@ public class TerminalHolder extends Page implements AutoCloseable {
         this.snippetPopupMenu.pack();
         this.snippetPopupMenu.setInvoker(this.btn);
         this.snippetPopupMenu.show(this.btn, this.btn.getWidth() - this.snippetPopupMenu.getPreferredSize().width,
-                                   this.btn.getHeight());
+                this.btn.getHeight());
     }
 
     public void close() {
@@ -142,9 +151,33 @@ public class TerminalHolder extends Page implements AutoCloseable {
     public void openNewTerminal(String command) {
         c++;
         TerminalComponent tc = new TerminalComponent(this.sessionContentPanel.getInfo(), c + "", command,
-                                                     this.sessionContentPanel);
+                this.sessionContentPanel);
         this.tabs.addTab(tc.getTabTitle(), tc);
         tc.getTabTitle().getCallback().accept(tc.toString());
         tc.start();
+    }
+
+    private void openExternalTerminal() {
+        SessionInfo info = sessionContentPanel.getInfo();
+        java.util.List<String> command = new java.util.ArrayList<>();
+        command.add("kitty");
+        command.add("ssh");
+        if (info.getPrivateKeyFile() != null && !info.getPrivateKeyFile().isEmpty()) {
+            command.add("-i");
+            command.add(info.getPrivateKeyFile());
+        }
+        if (info.getPort() != 22) {
+            command.add("-p");
+            command.add(String.valueOf(info.getPort()));
+        }
+        command.add(info.getUser() + "@" + info.getHost());
+
+        try {
+            new ProcessBuilder(command).start();
+        } catch (java.io.IOException e) {
+            log.error("Failed to open external terminal", e);
+            JOptionPane.showMessageDialog(this, "Failed to open external terminal (kitty): " + e.getMessage(), "Error",
+                    JOptionPane.ERROR_MESSAGE);
+        }
     }
 }
