@@ -46,7 +46,7 @@ import static muon.app.util.PlatformUtils.IS_MAC;
  */
 @Slf4j
 public class SSHHandler implements Closeable {
-    private static final int CONNECTION_TIMEOUT = App.getGlobalSettings().getConnectionTimeout() * 1000;
+    private static final int KEEP_ALIVE_INTERVAL_SEC = 30;
     public static final String LOCALHOST = "127.0.0.1";
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -187,7 +187,6 @@ public class SSHHandler implements Closeable {
                 createTunnel(hopStack);
             }
 
-            sshj.getConnection().getKeepAlive().setKeepAliveInterval(5);
             setX11Forwarding();
 
             if (closed.get()) {
@@ -289,13 +288,22 @@ public class SSHHandler implements Closeable {
 
     private void initializeSSHClient() {
         DefaultConfig defaultConfig = new DefaultConfig();
-        if (App.getGlobalSettings().isShowMessagePrompt()) {
+        boolean keepAliveEnabled = App.getGlobalSettings().isConnectionKeepAlive();
+        if (keepAliveEnabled) {
             log.info("enabled KeepAliveProvider");
             defaultConfig.setKeepAliveProvider(KeepAliveProvider.KEEP_ALIVE);
         }
         sshj = new SSHClient(defaultConfig);
-        sshj.setConnectTimeout(CONNECTION_TIMEOUT);
-        sshj.setTimeout(CONNECTION_TIMEOUT);
+        int timeoutMs = getConnectionTimeoutMs();
+        sshj.setConnectTimeout(timeoutMs);
+        sshj.setTimeout(keepAliveEnabled ? 0 : timeoutMs);
+        if (keepAliveEnabled) {
+            sshj.getConnection().getKeepAlive().setKeepAliveInterval(KEEP_ALIVE_INTERVAL_SEC);
+        }
+    }
+
+    private int getConnectionTimeoutMs() {
+        return App.getGlobalSettings().getConnectionTimeout() * 1000;
     }
 
     private void setX11Forwarding() throws IOException {
@@ -502,7 +510,6 @@ public class SSHHandler implements Closeable {
 
 
     public RemotePortForwarder getRemotePortForwarder() {
-        this.sshj.getConnection().getKeepAlive().setKeepAliveInterval(30);
         return this.sshj.getRemotePortForwarder();
     }
 
