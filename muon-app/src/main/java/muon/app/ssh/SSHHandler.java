@@ -296,7 +296,7 @@ public class SSHHandler implements Closeable {
         sshj = new SSHClient(defaultConfig);
         int timeoutMs = getConnectionTimeoutMs();
         sshj.setConnectTimeout(timeoutMs);
-        sshj.setTimeout(keepAliveEnabled ? 0 : timeoutMs);
+        sshj.setTimeout(timeoutMs);
         if (keepAliveEnabled) {
             sshj.getConnection().getKeepAlive().setKeepAliveInterval(KEEP_ALIVE_INTERVAL_SEC);
         }
