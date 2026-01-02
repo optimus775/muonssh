@@ -163,6 +163,10 @@ public class TerminalHolder extends Page implements AutoCloseable {
         command.add("kitty");
         command.add("--hold");
         command.add("ssh");
+        command.add("-o");
+        command.add("ServerAliveInterval=15");
+        command.add("-o");
+        command.add("ServerAliveCountMax=3");
         if (info.getPrivateKeyFile() != null && !info.getPrivateKeyFile().isEmpty()) {
             command.add("-i");
             command.add(info.getPrivateKeyFile());
