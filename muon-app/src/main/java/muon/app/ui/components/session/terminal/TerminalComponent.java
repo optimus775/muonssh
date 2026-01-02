@@ -17,6 +17,7 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,7 +26,7 @@ import static muon.app.util.ScalingUtil.getScaledEmptyBorder;
 
 @Slf4j
 public class TerminalComponent extends JPanel implements ClosableTabContent {
-    private static final int[] RECONNECT_DELAYS_SEC = {2, 5, 10, 20, 30};
+    private static final int[] RECONNECT_DELAYS_SEC = { 2, 5, 10, 20 };
     private static final int RECONNECT_VERIFY_DELAY_SEC = 5;
     private final JPanel contentPane;
 
@@ -40,6 +41,7 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
     private final JLabel reconnectLabel;
     private final JButton btnReconnect;
     private final ScheduledExecutorService reconnectExecutor;
+    private ScheduledFuture<?> reconnectFuture;
     private final AtomicInteger reconnectAttempt = new AtomicInteger(0);
     private final AtomicBoolean reconnectScheduled = new AtomicBoolean(false);
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -114,6 +116,9 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
     public boolean close() {
         log.info("Closing terminal...{}", name);
         closed.set(true);
+        if (reconnectFuture != null) {
+            reconnectFuture.cancel(false);
+        }
         reconnectExecutor.shutdownNow();
         this.term.close();
         return true;
@@ -133,20 +138,24 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
         }
         int attempt = reconnectAttempt.getAndIncrement();
         int delaySec = RECONNECT_DELAYS_SEC[Math.min(attempt, RECONNECT_DELAYS_SEC.length - 1)];
-        SwingUtilities.invokeLater(() -> showReconnectBanner("Session not connected. Reconnecting in " + delaySec + "s"));
-        reconnectExecutor.schedule(() -> SwingUtilities.invokeLater(this::doReconnect), delaySec, TimeUnit.SECONDS);
+        SwingUtilities
+                .invokeLater(() -> showReconnectBanner("Session not connected. Reconnecting in " + delaySec + "s"));
+        reconnectFuture = reconnectExecutor.schedule(() -> SwingUtilities.invokeLater(this::doReconnect), delaySec,
+                TimeUnit.SECONDS);
     }
 
     private void scheduleReconnectCheck() {
-        reconnectExecutor.schedule(() -> {
+        reconnectFuture = reconnectExecutor.schedule(() -> {
             if (closed.get()) {
                 return;
             }
             boolean connected = tty != null && tty.isConnected();
             if (connected) {
                 reconnectAttempt.set(0);
+                reconnectScheduled.set(false);
                 SwingUtilities.invokeLater(this::hideReconnectBanner);
             } else {
+                reconnectScheduled.set(false);
                 scheduleAutoReconnect();
             }
         }, RECONNECT_VERIFY_DELAY_SEC, TimeUnit.SECONDS);
@@ -156,7 +165,10 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
         if (closed.get()) {
             return;
         }
-        reconnectScheduled.set(false);
+        if (reconnectFuture != null) {
+            reconnectFuture.cancel(false);
+        }
+        reconnectScheduled.set(true);
         showReconnectBanner("Reconnecting...");
         tty = new SshTtyConnector(info, initialCommand, sessionContentPanel);
         term.setTtyConnector(tty);

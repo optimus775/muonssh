@@ -10,7 +10,9 @@ import muon.app.ui.components.session.SessionInfo;
 import muon.app.util.OptionPaneUtils;
 import muon.app.util.SshUtil;
 import muon.app.util.enums.JumpType;
+import net.schmizz.keepalive.KeepAlive;
 import net.schmizz.keepalive.KeepAliveProvider;
+import net.schmizz.keepalive.KeepAliveRunner;
 import net.schmizz.sshj.DefaultConfig;
 import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.connection.channel.direct.DirectConnection;
@@ -298,7 +300,21 @@ public class SSHHandler implements Closeable {
         sshj.setConnectTimeout(timeoutMs);
         sshj.setTimeout(timeoutMs);
         if (keepAliveEnabled) {
-            sshj.getConnection().getKeepAlive().setKeepAliveInterval(KEEP_ALIVE_INTERVAL_SEC);
+            int timeoutSec = Math.max(1, timeoutMs / 1000);
+            int intervalSec = Math.min(KEEP_ALIVE_INTERVAL_SEC, timeoutSec);
+            sshj.getConnection().getKeepAlive().setKeepAliveInterval(intervalSec);
+            configureKeepAliveMax(intervalSec, timeoutSec);
+        }
+    }
+
+    private void configureKeepAliveMax(int intervalSec, int timeoutSec) {
+        KeepAlive keepAlive = sshj.getConnection().getKeepAlive();
+        if (keepAlive instanceof KeepAliveRunner) {
+            int maxAliveCount = Math.max(1, timeoutSec / intervalSec);
+            ((KeepAliveRunner) keepAlive).setMaxAliveCount(maxAliveCount);
+            log.info("KeepAlive configured: interval={}s, maxAliveCount={}", intervalSec, maxAliveCount);
+        } else {
+            log.debug("KeepAlive provider {} does not support maxAliveCount", keepAlive.getClass().getName());
         }
     }
 
