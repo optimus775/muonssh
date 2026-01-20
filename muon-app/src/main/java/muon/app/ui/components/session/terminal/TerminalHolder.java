@@ -45,7 +45,7 @@ public class TerminalHolder extends Page implements AutoCloseable {
         tabs.getButtonsBox().add(btn);
 
         JButton btnExternal = new JButton();
-        btnExternal.setToolTipText("Open in External Terminal (Kitty)");
+        btnExternal.setToolTipText("Open in External Terminal (Konsole)");
         btnExternal.addActionListener(e -> openExternalTerminal());
         btnExternal.setFont(App.getCONTEXT().getSkin().getIconFont(SMALL_TEXT_SIZE));
         btnExternal.setText(FontAwesomeContants.FA_EXTERNAL_LINK);
@@ -160,8 +160,9 @@ public class TerminalHolder extends Page implements AutoCloseable {
     private void openExternalTerminal() {
         SessionInfo info = sessionContentPanel.getInfo();
         java.util.List<String> command = new java.util.ArrayList<>();
-        command.add("kitty");
+        command.add("konsole");
         command.add("--hold");
+        command.add("-e");
         command.add("ssh");
         command.add("-o");
         command.add("ServerAliveInterval=15");
@@ -181,7 +182,7 @@ public class TerminalHolder extends Page implements AutoCloseable {
             new ProcessBuilder(command).start();
         } catch (java.io.IOException e) {
             log.error("Failed to open external terminal", e);
-            JOptionPane.showMessageDialog(this, "Failed to open external terminal (kitty): " + e.getMessage(), "Error",
+            JOptionPane.showMessageDialog(this, "Failed to open external terminal (konsole): " + e.getMessage(), "Error",
                     JOptionPane.ERROR_MESSAGE);
         }
     }
