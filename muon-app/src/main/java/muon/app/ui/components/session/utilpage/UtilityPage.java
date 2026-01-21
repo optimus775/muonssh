@@ -8,6 +8,7 @@ import muon.app.ui.components.session.SessionContentPanel;
 import muon.app.ui.components.session.utilpage.keys.KeyPage;
 import muon.app.ui.components.session.utilpage.nettools.NetworkToolsPage;
 import muon.app.ui.components.session.utilpage.portview.PortViewer;
+import muon.app.ui.components.session.utilpage.docker.DockerStatsPanel;
 import muon.app.ui.components.session.utilpage.services.ServicePanel;
 import muon.app.ui.components.session.utilpage.sysinfo.SysInfoPanel;
 import muon.app.ui.components.session.utilpage.sysload.SysLoadPage;
@@ -79,7 +80,10 @@ public class UtilityPage extends Page {
         UtilityPageButton b6 = new UtilityPageButton(App.getCONTEXT().getBundle().getString("network_tools"),
                 FontAwesomeContants.FA_WRENCH);
 
-        LayoutUtilities.equalizeSize(b1, b2, b3, b4, b5, b6);
+        UtilityPageButton b7 = new UtilityPageButton(App.getCONTEXT().getBundle().getString("docker"),
+                FontAwesomeContants.FA_CUBE);
+
+        LayoutUtilities.equalizeSize(b1, b2, b3, b4, b5, b6, b7);
 
         vbox.setBorder(
                 getScaledMatteBorder(0, 0, 0, 1, App.getCONTEXT().getSkin().getDefaultBorderColor()));
@@ -93,7 +97,10 @@ public class UtilityPage extends Page {
         b3.setAlignmentX(Box.LEFT_ALIGNMENT);
         vbox.add(b3);
 
-        b5.setAlignmentX(Box.LEFT_ALIGNMENT);
+        b7.setAlignmentX(Box.LEFT_ALIGNMENT);
+        vbox.add(b7);
+
+        b4.setAlignmentX(Box.LEFT_ALIGNMENT);
         vbox.add(b4);
 
         b5.setAlignmentX(Box.LEFT_ALIGNMENT);
@@ -110,6 +117,7 @@ public class UtilityPage extends Page {
         bg.add(b4);
         bg.add(b5);
         bg.add(b6);
+        bg.add(b7);
 
         JScrollPane jsp = new SkinnedScrollPane(vbox);
         jsp.setHorizontalScrollBarPolicy(
@@ -134,12 +142,15 @@ public class UtilityPage extends Page {
 
         b6.addActionListener(e -> cardLayout.show(cardPanel, "NET_TOOLS"));
 
+        b7.addActionListener(e -> cardLayout.show(cardPanel, "DOCKER_STATS"));
+
         JPanel p1 = new SysInfoPanel(holder);
         JPanel p2 = new SysLoadPage(holder);
         JPanel p3 = new ServicePanel(holder);
         JPanel p4 = new PortViewer(holder);
         JPanel p5 = new KeyPage(holder);
         JPanel p6 = new NetworkToolsPage(holder);
+        JPanel p7 = new DockerStatsPanel(holder);
 
         cardLayout = new CardLayout();
         cardPanel = new JPanel(cardLayout);
@@ -150,6 +161,7 @@ public class UtilityPage extends Page {
         cardPanel.add(p4, "PROC_PORT");
         cardPanel.add(p5, "SSH_KEYS");
         cardPanel.add(p6, "NET_TOOLS");
+        cardPanel.add(p7, "DOCKER_STATS");
 
         this.add(cardPanel);
     }

@@ -464,10 +464,21 @@ public class ServicePanel extends UtilPageItemView {
         SkinnedTextArea textArea = new SkinnedTextArea();
         textArea.setEditable(false);
         textArea.setFont(new Font("Noto Mono", Font.PLAIN, 13));
+        textArea.setLineWrap(true);
+        textArea.setWrapStyleWord(true);
         textArea.setText(output == null ? "" : output);
         textArea.setCaretPosition(0);
         JScrollPane scrollPane = new SkinnedScrollPane(textArea);
-        scrollPane.setPreferredSize(scale(new Dimension(720, 420)));
+        Dimension baseSize = scale(new Dimension(720, 420));
+        double areaScale = Math.sqrt(2.0);
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        int maxWidth = (int) Math.round(screen.width * 0.8);
+        int maxHeight = (int) Math.round(screen.height * 0.8);
+        int targetWidth = (int) Math.round(baseSize.width * areaScale);
+        int targetHeight = (int) Math.round(baseSize.height * areaScale);
+        scrollPane.setPreferredSize(new Dimension(
+                Math.min(targetWidth, maxWidth),
+                Math.min(targetHeight, maxHeight)));
         String title = App.getCONTEXT().getBundle().getString("status");
         if (serviceName != null) {
             title = title + ": " + serviceName;

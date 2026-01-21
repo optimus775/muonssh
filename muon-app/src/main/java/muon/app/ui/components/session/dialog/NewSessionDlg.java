@@ -14,7 +14,10 @@ import javax.swing.event.*;
 import javax.swing.tree.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
+import java.util.Objects;
 
 import static muon.app.ui.components.session.dialog.TreeManager.getNewUuid;
 import static muon.app.ui.components.session.dialog.TreeManager.getNode;
@@ -39,7 +42,10 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
     private NamedItem selectedInfo;
     private SessionInfo info;
     private JLabel lblName;
-    private JPopupMenu groupPopupMenu;
+    private boolean sorting;
+    private boolean sortScheduled;
+    private boolean updatingNameField;
+    private static final String EMPTY_ROOT = "Empty_Root";
 
     public NewSessionDlg(Window wnd) {
         super(wnd);
@@ -80,9 +86,11 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
                     TreePath path = tree.getPathForLocation(e.getX(), e.getY());
                     if (path != null) {
                         DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
-                        if (node != null && node.getChildCount() > 0) {
+                        if (node != null) {
                             tree.setSelectionPath(path);
-                            groupPopupMenu.show(tree, e.getX(), e.getY());
+                            if (node.getUserObject() instanceof SessionInfo) {
+                                showMoveToFolderMenu(node, e);
+                            }
                         }
                     }
                 } else if (e.getClickCount() == 2) {
@@ -211,6 +219,12 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             }
 
             private void updateName() {
+                if (updatingNameField) {
+                    return;
+                }
+                if (selectedInfo == null) {
+                    return;
+                }
                 selectedInfo.setName(txtName.getText());
                 TreePath parentPath = tree.getSelectionPath();
                 DefaultMutableTreeNode parentNode;
@@ -242,48 +256,68 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         sessionInfoPanel.setVisible(false);
         btnConnect.setVisible(false);
 
-        // --- Add popup menu for sorting ---
-        groupPopupMenu = new JPopupMenu();
-        JMenuItem sortAZMenuItem = new JMenuItem("Sort A-Z");
-        JMenuItem sortZAMenuItem = new JMenuItem("Sort Z-A");
-        groupPopupMenu.add(sortAZMenuItem);
-        groupPopupMenu.add(sortZAMenuItem);
-
-        sortAZMenuItem.addActionListener(e -> sortGroup(true));
-        sortZAMenuItem.addActionListener(e -> sortGroup(false));
-        // --- End popup menu ---
-
         rootNode = treeManager.loadTree(SessionStore.load(), treeModel, tree);
+        sortTreeAndKeepSelection();
     }
 
-    private void sortGroup(boolean ascending) {
-        TreePath path = tree.getSelectionPath();
-        if (path == null) return;
-        DefaultMutableTreeNode groupNode = (DefaultMutableTreeNode) path.getLastPathComponent();
-        if (!(groupNode.getChildCount() > 0)) return;
+    private void showMoveToFolderMenu(DefaultMutableTreeNode node, MouseEvent e) {
+        List<FolderTarget> folders = new ArrayList<>();
+        collectFolders(getTreeRoot(), "", folders);
 
-        java.util.List<DefaultMutableTreeNode> children = new java.util.ArrayList<>();
-        for (int i = 0; i < groupNode.getChildCount(); i++) {
-            DefaultMutableTreeNode child = (DefaultMutableTreeNode) groupNode.getChildAt(i);
-            if (child.getUserObject() instanceof SessionInfo) {
-                children.add(child);
+        JPopupMenu menu = new JPopupMenu();
+        JMenu moveMenu = new JMenu(App.getCONTEXT().getBundle().getString("move_to_folder"));
+        if (folders.isEmpty()) {
+            JMenuItem emptyItem = new JMenuItem(App.getCONTEXT().getBundle().getString("no_folders"));
+            emptyItem.setEnabled(false);
+            moveMenu.add(emptyItem);
+        } else {
+            for (FolderTarget folder : folders) {
+                JMenuItem item = new JMenuItem(folder.path);
+                item.addActionListener(ev -> moveNodeToFolder(node, folder.node));
+                moveMenu.add(item);
             }
         }
-        // Remove all SessionInfo children
-        for (DefaultMutableTreeNode child : children) {
-            treeModel.removeNodeFromParent(child);
+        menu.add(moveMenu);
+        menu.show(tree, e.getX(), e.getY());
+    }
+
+    private void moveNodeToFolder(DefaultMutableTreeNode node, DefaultMutableTreeNode targetFolder) {
+        if (node == null || targetFolder == null || !targetFolder.getAllowsChildren()) {
+            return;
         }
-        // Sort
-        children.sort((a, b) -> {
-            String nameA = ((SessionInfo) a.getUserObject()).getName();
-            String nameB = ((SessionInfo) b.getUserObject()).getName();
-            return ascending ? nameA.compareToIgnoreCase(nameB) : nameB.compareToIgnoreCase(nameA);
-        });
-        // Re-insert
-        for (DefaultMutableTreeNode child : children) {
-            treeModel.insertNodeInto(child, groupNode, groupNode.getChildCount());
+        if (node.getParent() == targetFolder) {
+            return;
         }
-        tree.expandPath(path);
+        String selectedId = getNodeId(node);
+        treeModel.removeNodeFromParent(node);
+        treeModel.insertNodeInto(node, targetFolder, targetFolder.getChildCount());
+        sortTreeAndReselect(selectedId);
+        TreePath path = new TreePath(node.getPath());
+        tree.scrollPathToVisible(path);
+        tree.setSelectionPath(path);
+    }
+
+    private void collectFolders(DefaultMutableTreeNode node, String parentPath,
+                                List<FolderTarget> folders) {
+        if (node == null) {
+            return;
+        }
+        Object obj = node.getUserObject();
+        String currentPath = parentPath;
+        if (isFolderNode(node) && obj instanceof NamedItem && !EMPTY_ROOT.equals(obj.toString())) {
+            String name = ((NamedItem) obj).getName();
+            currentPath = parentPath.isEmpty() ? name : parentPath + "/" + name;
+            folders.add(new FolderTarget(node, currentPath));
+        }
+        Enumeration<TreeNode> children = node.children();
+        while (children.hasMoreElements()) {
+            DefaultMutableTreeNode child = (DefaultMutableTreeNode) children.nextElement();
+            collectFolders(child, currentPath, folders);
+        }
+    }
+
+    private DefaultMutableTreeNode getTreeRoot() {
+        return (DefaultMutableTreeNode) treeModel.getRoot();
     }
 
     @Override
@@ -505,13 +539,17 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             selectedInfo = sessionInfo;
             txtName.setVisible(true);
             lblName.setVisible(true);
+            updatingNameField = true;
             txtName.setText(selectedInfo.getName());
+            updatingNameField = false;
             btnConnect.setVisible(true);
         } else if (nodeInfo instanceof NamedItem) {
             selectedInfo = (NamedItem) nodeInfo;
             lblName.setVisible(true);
             txtName.setVisible(true);
+            updatingNameField = true;
             txtName.setText(selectedInfo.getName());
+            updatingNameField = false;
             sessionInfoPanel.setVisible(false);
             btnConnect.setVisible(false);
         }
@@ -537,26 +575,158 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
     @Override
     public void treeNodesChanged(TreeModelEvent e) {
         log.debug("treeNodesChanged");
+        scheduleSort();
     }
 
     @Override
     public void treeNodesInserted(TreeModelEvent e) {
         log.debug("treeNodesInserted");
+        scheduleSort();
     }
 
     @Override
     public void treeNodesRemoved(TreeModelEvent e) {
         log.debug("treeNodesRemoved");
+        scheduleSort();
     }
 
     @Override
     public void treeStructureChanged(TreeModelEvent e) {
         log.debug("treeStructureChanged");
+        scheduleSort();
+    }
+
+    private void scheduleSort() {
+        if (sorting || sortScheduled) {
+            return;
+        }
+        sortScheduled = true;
+        SwingUtilities.invokeLater(() -> {
+            sortScheduled = false;
+            sortTreeAndKeepSelection();
+        });
+    }
+
+    private void sortTreeAndKeepSelection() {
+        sortTreeAndReselect(getSelectedNodeId());
+    }
+
+    private void sortTreeAndReselect(String selectedId) {
+        if (sorting) {
+            return;
+        }
+        sorting = true;
+        try {
+            sortTree(getTreeRoot());
+        } finally {
+            sorting = false;
+        }
+        if (selectedId != null) {
+            selectNodeById(selectedId, getTreeRoot());
+        }
+    }
+
+    private void sortTree(DefaultMutableTreeNode node) {
+        if (node == null) {
+            return;
+        }
+        List<DefaultMutableTreeNode> children = new ArrayList<>();
+        Enumeration<TreeNode> enumeration = node.children();
+        while (enumeration.hasMoreElements()) {
+            children.add((DefaultMutableTreeNode) enumeration.nextElement());
+        }
+        children.sort((a, b) -> {
+            boolean aFolder = isFolderNode(a);
+            boolean bFolder = isFolderNode(b);
+            if (aFolder != bFolder) {
+                return aFolder ? -1 : 1;
+            }
+            String nameA = getNodeName(a);
+            String nameB = getNodeName(b);
+            return nameA.compareToIgnoreCase(nameB);
+        });
+        for (int i = node.getChildCount() - 1; i >= 0; i--) {
+            treeModel.removeNodeFromParent((MutableTreeNode) node.getChildAt(i));
+        }
+        for (DefaultMutableTreeNode child : children) {
+            treeModel.insertNodeInto(child, node, node.getChildCount());
+        }
+        for (DefaultMutableTreeNode child : children) {
+            if (isFolderNode(child)) {
+                sortTree(child);
+            }
+        }
+    }
+
+    private boolean isFolderNode(DefaultMutableTreeNode node) {
+        return node.getAllowsChildren();
+    }
+
+    private String getNodeName(DefaultMutableTreeNode node) {
+        Object obj = node.getUserObject();
+        if (obj instanceof NamedItem) {
+            return Objects.toString(((NamedItem) obj).getName(), "");
+        }
+        return Objects.toString(obj, "");
+    }
+
+    private String getSelectedNodeId() {
+        TreePath path = tree.getSelectionPath();
+        if (path == null) {
+            return null;
+        }
+        DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
+        return getNodeId(node);
+    }
+
+    private String getNodeId(DefaultMutableTreeNode node) {
+        if (node == null) {
+            return null;
+        }
+        Object obj = node.getUserObject();
+        if (obj instanceof NamedItem) {
+            return ((NamedItem) obj).getId();
+        }
+        return null;
+    }
+
+    private boolean selectNodeById(String id, DefaultMutableTreeNode node) {
+        if (id == null || node == null) {
+            return false;
+        }
+        Object obj = node.getUserObject();
+        if (obj instanceof NamedItem && id.equals(((NamedItem) obj).getId())) {
+            TreePath path = new TreePath(node.getPath());
+            TreePath current = tree.getSelectionPath();
+            if (!path.equals(current)) {
+                tree.setSelectionPath(path);
+            }
+            tree.scrollPathToVisible(path);
+            return true;
+        }
+        Enumeration<TreeNode> children = node.children();
+        while (children.hasMoreElements()) {
+            DefaultMutableTreeNode child = (DefaultMutableTreeNode) children.nextElement();
+            if (selectNodeById(id, child)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void normalizeButtonSize() {
         int width = Math.max(btnConnect.getPreferredSize().width, btnCancel.getPreferredSize().width);
         btnConnect.setPreferredSize(scale(new Dimension(width, btnConnect.getPreferredSize().height)));
         btnCancel.setPreferredSize(scale(new Dimension(width, btnCancel.getPreferredSize().height)));
+    }
+
+    private static final class FolderTarget {
+        private final DefaultMutableTreeNode node;
+        private final String path;
+
+        private FolderTarget(DefaultMutableTreeNode node, String path) {
+            this.node = node;
+            this.path = path;
+        }
     }
 }
