@@ -180,7 +180,7 @@ public class FolderView extends JPanel {
 
         table.setRowSorter(sorter);
 
-        this.sort(1, SortOrder.DESCENDING);
+        this.sort(0, SortOrder.ASCENDING);
 
         table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
                 .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "Enter");
@@ -376,6 +376,8 @@ public class FolderView extends JPanel {
             TableColumn col = columnModel.getColumn(column);
             if (column == 0) {
                 col.setPreferredWidth(200);
+            } else if (column == 1) {
+                col.setPreferredWidth(154);
             } else if (column == 3) {
                 col.setPreferredWidth(120);
             } else {

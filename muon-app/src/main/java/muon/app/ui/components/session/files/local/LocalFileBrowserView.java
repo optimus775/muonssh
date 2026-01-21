@@ -11,7 +11,9 @@ import muon.app.ui.components.session.files.view.AddressBar;
 import muon.app.ui.components.session.files.view.DndTransferData;
 import muon.app.ui.components.session.files.view.DndTransferHandler;
 import muon.app.util.PathUtils;
+import muon.app.util.PlatformUtils;
 import muon.app.util.enums.DndSourceType;
+import muon.app.util.enums.FileType;
 import muon.app.util.enums.PanelOrientation;
 
 import javax.swing.*;
@@ -130,6 +132,16 @@ public class LocalFileBrowserView extends AbstractFileBrowserView {
     @Override
     public void openApp(FileInfo file) {
         log.debug("openApp {}", file);
+        if (file == null) {
+            return;
+        }
+        if (file.getType() == FileType.FILE || file.getType() == FileType.FILE_LINK) {
+            try {
+                PlatformUtils.openWithDefaultApp(new File(file.getPath()), false);
+            } catch (Exception e) {
+                log.error(e.getMessage(), e);
+            }
+        }
     }
 
     @Override

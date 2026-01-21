@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
 import muon.app.ssh.RemoteSessionInstance;
 import muon.app.ui.components.common.SkinnedScrollPane;
+import muon.app.ui.components.common.SkinnedTextArea;
 import muon.app.ui.components.common.SkinnedTextField;
+import muon.app.ui.components.session.SessionInfo;
 import muon.app.ui.components.session.SessionContentPanel;
 import muon.app.ui.components.session.utilpage.UtilPageItemView;
 import muon.app.util.SudoUtils;
@@ -13,6 +15,7 @@ import muon.app.util.SudoUtils;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
+import java.io.IOException;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,6 +48,8 @@ public class ServicePanel extends UtilPageItemView {
     private JButton btnReload;
     private JButton btnEnable;
     private JButton btnDisable;
+    private JButton btnStatus;
+    private JButton btnJournal;
     private JTextField txtFilter;
     private JCheckBox chkRunAsSuperUser;
     private List<ServiceEntry> list;
@@ -206,6 +211,22 @@ public class ServicePanel extends UtilPageItemView {
         return "systemctl disable " + cmd;
     }
 
+    public String getStatusServiceCommand() {
+        String cmd = getSelectedServiceUnit();
+        if (cmd == null) {
+            return null;
+        }
+        return "systemctl status " + cmd + " --no-pager -l 2>&1";
+    }
+
+    private String getSelectedServiceUnit() {
+        String cmd = getSelectedService();
+        if (cmd == null) {
+            return null;
+        }
+        return cmd.endsWith(".service") ? cmd : cmd + ".service";
+    }
+
     public boolean getUseSuperUser() {
         return chkRunAsSuperUser.isSelected();
     }
@@ -258,6 +279,8 @@ public class ServicePanel extends UtilPageItemView {
         btnReload = new JButton(App.getCONTEXT().getBundle().getString("reload"));
         btnEnable = new JButton(App.getCONTEXT().getBundle().getString("enable"));
         btnDisable = new JButton(App.getCONTEXT().getBundle().getString("disable"));
+        btnStatus = new JButton(App.getCONTEXT().getBundle().getString("status"));
+        btnJournal = new JButton(App.getCONTEXT().getBundle().getString("journal"));
         JButton btnRefresh = new JButton(App.getCONTEXT().getBundle().getString("refresh"));
 
         chkRunAsSuperUser = new JCheckBox(
@@ -277,6 +300,10 @@ public class ServicePanel extends UtilPageItemView {
         box.add(Box.createHorizontalStrut(5));
         box.add(btnDisable);
         box.add(Box.createHorizontalStrut(5));
+        box.add(btnStatus);
+        box.add(Box.createHorizontalStrut(5));
+        box.add(btnJournal);
+        box.add(Box.createHorizontalStrut(5));
         box.add(btnRefresh);
         box.add(Box.createHorizontalStrut(5));
         box.setBorder(getScaledEmptyBorder(10, 0, 0, 0));
@@ -289,6 +316,9 @@ public class ServicePanel extends UtilPageItemView {
         this.setDisableServiceActionListener(e -> performServiceAction(4));
         this.setReloadServiceActionListener(e -> performServiceAction(5));
         this.setRestartServiceActionListener(e -> performServiceAction(6));
+
+        btnStatus.addActionListener(e -> showServiceStatus());
+        btnJournal.addActionListener(e -> openServiceJournal());
 
         btnRefresh.addActionListener(e -> holder.EXECUTOR.submit(() -> {
             AtomicBoolean stopFlag = new AtomicBoolean(false);
@@ -395,6 +425,95 @@ public class ServicePanel extends UtilPageItemView {
                               AtomicBoolean stopFlag, String command) throws Exception {
         StringBuilder output = new StringBuilder();
         return client.exec(command, new AtomicBoolean(false), output) == 0;
+    }
+
+    private void showServiceStatus() {
+        String cmd = getStatusServiceCommand();
+        if (cmd == null) {
+            JOptionPane.showMessageDialog(this, App.getCONTEXT().getBundle().getString("select_item"));
+            return;
+        }
+        AtomicBoolean stopFlag = new AtomicBoolean(false);
+        holder.disableUi(stopFlag);
+        boolean elevated = this.getUseSuperUser();
+        holder.EXECUTOR.submit(() -> {
+            StringBuilder output = new StringBuilder();
+            try {
+                int ret;
+                if (elevated) {
+                    ret = SudoUtils.runSudoWithOutput(cmd, holder.getRemoteSessionInstance(), output,
+                                                      new StringBuilder(), holder.getInfo().getPassword());
+                } else {
+                    ret = holder.getRemoteSessionInstance().exec(cmd, stopFlag, output, null);
+                }
+                if (ret != 0 && output.length() == 0 && !holder.isSessionClosed()) {
+                    output.append(App.getCONTEXT().getBundle().getString("operation_failed"));
+                }
+                String text = output.toString();
+                String serviceName = getSelectedServiceUnit();
+                SwingUtilities.invokeLater(() -> showStatusDialog(serviceName, text));
+            } catch (Exception e) {
+                log.error(e.getMessage(), e);
+            } finally {
+                holder.enableUi();
+            }
+        });
+    }
+
+    private void showStatusDialog(String serviceName, String output) {
+        SkinnedTextArea textArea = new SkinnedTextArea();
+        textArea.setEditable(false);
+        textArea.setFont(new Font("Noto Mono", Font.PLAIN, 13));
+        textArea.setText(output == null ? "" : output);
+        textArea.setCaretPosition(0);
+        JScrollPane scrollPane = new SkinnedScrollPane(textArea);
+        scrollPane.setPreferredSize(scale(new Dimension(720, 420)));
+        String title = App.getCONTEXT().getBundle().getString("status");
+        if (serviceName != null) {
+            title = title + ": " + serviceName;
+        }
+        JOptionPane.showMessageDialog(this, scrollPane, title, JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private void openServiceJournal() {
+        String serviceName = getSelectedServiceUnit();
+        if (serviceName == null) {
+            JOptionPane.showMessageDialog(this, App.getCONTEXT().getBundle().getString("select_item"));
+            return;
+        }
+        SessionInfo info = holder.getInfo();
+        List<String> command = new ArrayList<>();
+        command.add("konsole");
+        command.add("--hold");
+        command.add("-e");
+        command.add("ssh");
+        command.add("-t");
+        command.add("-o");
+        command.add("ServerAliveInterval=15");
+        command.add("-o");
+        command.add("ServerAliveCountMax=3");
+        if (info.getPrivateKeyFile() != null && !info.getPrivateKeyFile().isEmpty()) {
+            command.add("-i");
+            command.add(info.getPrivateKeyFile());
+        }
+        if (info.getPort() != 22) {
+            command.add("-p");
+            command.add(String.valueOf(info.getPort()));
+        }
+        command.add(info.getUser() + "@" + info.getHost());
+        if (getUseSuperUser()) {
+            command.add("sudo");
+        }
+        command.add("journalctl");
+        command.add("-fu");
+        command.add(serviceName);
+        try {
+            new ProcessBuilder(command).start();
+        } catch (IOException e) {
+            log.error("Failed to open journal", e);
+            JOptionPane.showMessageDialog(this, "Failed to open journal: " + e.getMessage(), "Error",
+                                          JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private void updateView(AtomicBoolean stopFlag) {
