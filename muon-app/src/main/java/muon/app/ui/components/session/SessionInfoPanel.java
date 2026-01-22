@@ -46,6 +46,8 @@ public class SessionInfoPanel extends JPanel {
     private SessionInfo info;
     private JCheckBox chkUseX11Forwarding;
     private JCheckBox chkSftpOnly;
+    private Runnable changeListener;
+    private boolean suppressChangeEvents;
 
     private JPanel proxyPanel;
     private JPanel jumpPanel;
@@ -54,6 +56,19 @@ public class SessionInfoPanel extends JPanel {
 
     public SessionInfoPanel() {
         createUI();
+    }
+
+    public void setChangeListener(Runnable changeListener) {
+        this.changeListener = changeListener;
+    }
+
+    private void notifyChange() {
+        if (suppressChangeEvents) {
+            return;
+        }
+        if (changeListener != null) {
+            changeListener.run();
+        }
     }
 
     private static void setEnableSubComponents(Component c, boolean enabled) {
@@ -80,25 +95,30 @@ public class SessionInfoPanel extends JPanel {
 
     public void setSessionInfo(SessionInfo info) {
         this.info = info;
-        setHost(info.getHost());
-        setPort(info.getPort());
-        setLocalFolder(info.getLocalFolder());
-        setRemoteFolder(info.getRemoteFolder());
-        setUser(info.getUser());
-        setPassword(info.getPassword() == null ? new char[0] : info.getPassword().toCharArray());
-        setKeyFile(info.getPrivateKeyFile());
-        setProxyType(info.getProxyType());
-        setProxyHost(info.getProxyHost());
-        setProxyPort(info.getProxyPort());
-        setProxyUser(info.getProxyUser());
+        suppressChangeEvents = true;
+        try {
+            setHost(info.getHost());
+            setPort(info.getPort());
+            setLocalFolder(info.getLocalFolder());
+            setRemoteFolder(info.getRemoteFolder());
+            setUser(info.getUser());
+            setPassword(info.getPassword() == null ? new char[0] : info.getPassword().toCharArray());
+            setKeyFile(info.getPrivateKeyFile());
+            setProxyType(info.getProxyType());
+            setProxyHost(info.getProxyHost());
+            setProxyPort(info.getProxyPort());
+            setProxyUser(info.getProxyUser());
 
-        setProxyPassword(info.getProxyPassword() == null ? new char[0] : info.getProxyPassword().toCharArray());
+            setProxyPassword(info.getProxyPassword() == null ? new char[0] : info.getProxyPassword().toCharArray());
 
-        setJumpHostDetails(info.isUseJumpHosts(), info.getJumpType(), info.getJumpHosts());
-        this.chkUseX11Forwarding.setSelected(info.isUseX11Forwarding());
-        this.chkSftpOnly.setSelected(info.isSftpOnly());
+            setJumpHostDetails(info.isUseJumpHosts(), info.getJumpType(), info.getJumpHosts());
+            this.chkUseX11Forwarding.setSelected(info.isUseX11Forwarding());
+            this.chkSftpOnly.setSelected(info.isSftpOnly());
 
-        panPF.setInfo(info);
+            panPF.setInfo(info);
+        } finally {
+            suppressChangeEvents = false;
+        }
     }
 
     private void setHost(String host) {
@@ -190,7 +210,10 @@ public class SessionInfoPanel extends JPanel {
         radMultiHopTunnel = new JRadioButton("Use multihop SSH tunnel");
         radMultiHopPortForwarding = new JRadioButton("Use multihop port forwarding");
 
-        chkUseJumpHosts.addActionListener(e -> info.setUseJumpHosts(chkUseJumpHosts.isSelected()));
+        chkUseJumpHosts.addActionListener(e -> {
+            info.setUseJumpHosts(chkUseJumpHosts.isSelected());
+            notifyChange();
+        });
 
         radMultiHopPortForwarding.addActionListener(e -> updateHopMode());
         radMultiHopTunnel.addActionListener(e -> updateHopMode());
@@ -200,6 +223,7 @@ public class SessionInfoPanel extends JPanel {
         bg.add(radMultiHopTunnel);
 
         panJumpHost = new JumpHostPanel();
+        panJumpHost.setChangeListener(this::notifyChange);
 
         GridBagConstraints c = new GridBagConstraints();
         c.weightx = 1;
@@ -250,6 +274,7 @@ public class SessionInfoPanel extends JPanel {
         JPanel panel = new JPanel(gbl1);
 
         panPF = new PortForwardingPanel();
+        panPF.setChangeListener(this::notifyChange);
 
         GridBagConstraints c = new GridBagConstraints();
         c.anchor = GridBagConstraints.LINE_START;
@@ -280,7 +305,10 @@ public class SessionInfoPanel extends JPanel {
         JLabel lblProxyPass = new JLabel(App.getCONTEXT().getBundle().getString("proxy_password") + App.getCONTEXT().getBundle().getString("warning_plain_text"));
 
         cmbProxy = new JComboBox<>(new String[]{"NONE", "HTTP", "SOCKS"});
-        cmbProxy.addActionListener(e -> info.setProxyType(cmbProxy.getSelectedIndex()));
+        cmbProxy.addActionListener(e -> {
+            info.setProxyType(cmbProxy.getSelectedIndex());
+            notifyChange();
+        });
 
         inpProxyHostName = new SkinnedTextField(10);// new
         inpProxyHostName.getDocument().addDocumentListener(new DocumentListener() {
@@ -302,10 +330,14 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateHost() {
                 info.setProxyHost(inpProxyHostName.getText());
+                notifyChange();
             }
         });
         proxyPortModel = new SpinnerNumberModel(8080, 1, DEFAULT_MAX_PORT, 1);
-        proxyPortModel.addChangeListener(arg0 -> info.setProxyPort((Integer) proxyPortModel.getValue()));
+        proxyPortModel.addChangeListener(arg0 -> {
+            info.setProxyPort((Integer) proxyPortModel.getValue());
+            notifyChange();
+        });
         JSpinner inpProxyPort = new JSpinner(proxyPortModel);
         JSpinner.NumberEditor editor = new JSpinner.NumberEditor(inpProxyPort, "#");
         inpProxyPort.setEditor(editor);
@@ -329,6 +361,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateUser() {
                 info.setProxyUser(inpProxyUserName.getText());
+                notifyChange();
             }
         });
 
@@ -352,6 +385,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updatePassword() {
                 info.setProxyPassword(new String(inpProxyPassword.getPassword()));
+                notifyChange();
             }
         });
         // -----------
@@ -479,6 +513,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateFolder() {
                 info.setLocalFolder(inpLocalFolder.getText());
+                notifyChange();
             }
         });
 
@@ -502,6 +537,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateFolder() {
                 info.setRemoteFolder(inpRemoteFolder.getText());
+                notifyChange();
             }
         });
 
@@ -605,11 +641,15 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateHost() {
                 info.setHost(inpHostName.getText());
+                notifyChange();
             }
         });
 
         portModel = new SpinnerNumberModel(22, 1, DEFAULT_MAX_PORT, 1);
-        portModel.addChangeListener(arg0 -> info.setPort((Integer) portModel.getValue()));
+        portModel.addChangeListener(arg0 -> {
+            info.setPort((Integer) portModel.getValue());
+            notifyChange();
+        });
         JSpinner inpPort = new JSpinner(portModel);
         JSpinner.NumberEditor editorTarget = new JSpinner.NumberEditor(inpPort, "#");
         inpPort.setEditor(editorTarget);
@@ -633,6 +673,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateUser() {
                 info.setUser(inpUserName.getText());
+                notifyChange();
             }
         });
 
@@ -656,6 +697,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updatePassword() {
                 info.setPassword(new String(inpPassword.getPassword()));
+                notifyChange();
             }
         });
 
@@ -679,6 +721,7 @@ public class SessionInfoPanel extends JPanel {
 
             private void updateKeyFile() {
                 info.setPrivateKeyFile(inpKeyFile.getText());
+                notifyChange();
             }
         });
 
@@ -713,7 +756,10 @@ public class SessionInfoPanel extends JPanel {
 
         chkUseX11Forwarding = new JCheckBox("X11 forwarding");
 
-        chkUseX11Forwarding.addActionListener(e -> info.setUseX11Forwarding(chkUseX11Forwarding.isSelected()));
+        chkUseX11Forwarding.addActionListener(e -> {
+            info.setUseX11Forwarding(chkUseX11Forwarding.isSelected());
+            notifyChange();
+        });
 
         chkSftpOnly = new JCheckBox("SFTP Only");
 
@@ -835,6 +881,7 @@ public class SessionInfoPanel extends JPanel {
         } else {
             info.setJumpType(JumpType.TCP_FORWARDING);
         }
+        notifyChange();
     }
 
     private boolean isSupportedPuttyKeyFile(File file) {
@@ -898,6 +945,7 @@ public class SessionInfoPanel extends JPanel {
         portForwardingPanel.repaint();
         chkUseX11Forwarding.revalidate();
         chkUseX11Forwarding.repaint();
+        notifyChange();
     }
 
 

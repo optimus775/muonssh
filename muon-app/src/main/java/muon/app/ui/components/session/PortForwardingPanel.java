@@ -22,6 +22,8 @@ public class PortForwardingPanel extends JPanel {
     private final PFTableModel model;
     private final JTable table;
     private SessionInfo info;
+    private Runnable changeListener;
+    private boolean suppressChangeEvents;
 
     public PortForwardingPanel() {
         super(new BorderLayout(10, 10));
@@ -83,13 +85,32 @@ public class PortForwardingPanel extends JPanel {
         this.add(b1, BorderLayout.EAST);
     }
 
+    public void setChangeListener(Runnable changeListener) {
+        this.changeListener = changeListener;
+    }
+
+    private void notifyChange() {
+        if (suppressChangeEvents) {
+            return;
+        }
+        if (changeListener != null) {
+            changeListener.run();
+        }
+    }
+
     private void updatePFRules() {
         this.info.setPortForwardingRules(model.getRules());
+        notifyChange();
     }
 
     public void setInfo(SessionInfo info) {
         this.info = info;
-        model.setRules(this.info.getPortForwardingRules());
+        suppressChangeEvents = true;
+        try {
+            model.setRules(this.info.getPortForwardingRules());
+        } finally {
+            suppressChangeEvents = false;
+        }
     }
 
     private PortForwardingRule addOrEditEntry(PortForwardingRule r) {

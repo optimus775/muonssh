@@ -20,6 +20,8 @@ public class JumpHostPanel extends JPanel {
     private final DefaultListModel<HopEntry> hopModel = new DefaultListModel<>();
     private final JList<HopEntry> hopList = new JList<>(hopModel);
     private SessionInfo info;
+    private Runnable changeListener;
+    private boolean suppressChangeEvents;
 
     public JumpHostPanel() {
         super(new BorderLayout(5, 5));
@@ -107,6 +109,19 @@ public class JumpHostPanel extends JPanel {
         this.add(b1, BorderLayout.EAST);
     }
 
+    public void setChangeListener(Runnable changeListener) {
+        this.changeListener = changeListener;
+    }
+
+    private void notifyChange() {
+        if (suppressChangeEvents) {
+            return;
+        }
+        if (changeListener != null) {
+            changeListener.run();
+        }
+    }
+
     private List<HopEntry> getJumpHosts() {
         List<HopEntry> list = new ArrayList<>();
         for (int i = 0; i < this.hopModel.size(); i++) {
@@ -125,11 +140,17 @@ public class JumpHostPanel extends JPanel {
 
     private void updateJumpHosts() {
         this.info.setJumpHosts(getJumpHosts());
+        notifyChange();
     }
 
     public void setInfo(SessionInfo info) {
         this.info = info;
-        setJumpHosts(this.info.getJumpHosts());
+        suppressChangeEvents = true;
+        try {
+            setJumpHosts(this.info.getJumpHosts());
+        } finally {
+            suppressChangeEvents = false;
+        }
     }
 
     private HopEntry addOrEditEntry(HopEntry e) {
