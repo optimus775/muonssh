@@ -5,6 +5,7 @@ import com.jediterm.terminal.TerminalColor;
 import com.jediterm.terminal.TextStyle;
 import com.jediterm.terminal.emulator.ColorPalette;
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider;
+import com.jediterm.terminal.ui.TerminalActionPresentation;
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
 import muon.app.common.settings.Settings;
@@ -13,6 +14,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Collections;
 
 import static muon.app.util.ScalingUtil.scale;
 
@@ -129,6 +131,39 @@ public class CustomizedSettingsProvider extends DefaultSettingsProvider {
 
     public final TerminalColor getTerminalColor(int rgb) {
         return TerminalColor.fromColor(new Color(rgb));
+    }
+
+    @Override
+    public @NotNull TerminalActionPresentation getCopyActionPresentation() {
+        return buildActionPresentation("Copy", Settings.COPY_KEY, super.getCopyActionPresentation());
+    }
+
+    @Override
+    public @NotNull TerminalActionPresentation getPasteActionPresentation() {
+        return buildActionPresentation("Paste", Settings.PASTE_KEY, super.getPasteActionPresentation());
+    }
+
+    @Override
+    public @NotNull TerminalActionPresentation getClearBufferActionPresentation() {
+        return buildActionPresentation("Clear Buffer", Settings.CLEAR_BUFFER, super.getClearBufferActionPresentation());
+    }
+
+    @Override
+    public @NotNull TerminalActionPresentation getFindActionPresentation() {
+        return buildActionPresentation("Find", Settings.FIND_KEY, super.getFindActionPresentation());
+    }
+
+    private @NotNull TerminalActionPresentation buildActionPresentation(String name, String key, TerminalActionPresentation fallback) {
+        Integer keyCode = App.getGlobalSettings().getKeyCodeMap().get(key);
+        Integer modifiers = App.getGlobalSettings().getKeyModifierMap().get(key);
+        if (keyCode == null || modifiers == null || keyCode == Integer.MIN_VALUE) {
+            return fallback;
+        }
+        KeyStroke keyStroke = KeyStroke.getKeyStroke(keyCode, modifiers);
+        if (keyStroke == null) {
+            return fallback;
+        }
+        return new TerminalActionPresentation(name, Collections.singletonList(keyStroke));
     }
 
 
