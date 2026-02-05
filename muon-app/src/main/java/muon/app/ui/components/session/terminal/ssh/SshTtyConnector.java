@@ -85,10 +85,12 @@ public class SshTtyConnector implements DisposableTtyConnector {
 
     private void setEnvVar() {
         try {
+            this.channel.setEnvVar("TERM", App.getGlobalSettings().getTerminalType());
             this.channel.setEnvVar("LANG", "en_US.UTF-8");
+            this.channel.setEnvVar("LC_ALL", "en_US.UTF-8");
         } catch (Exception e) {
             log.error(e.getMessage(), e);
-            log.error("Cannot set environment variable Lang: {}", e.getMessage());
+            log.error("Cannot set terminal environment variables: {}", e.getMessage());
         }
     }
 

@@ -115,8 +115,11 @@ public class CustomizedSettingsProvider extends DefaultSettingsProvider {
     @Override
     public Font getTerminalFont() {
         log.debug("Called terminal font: {}", App.getGlobalSettings().getTerminalFontName());
-        return FontUtils.loadTerminalFont(App.getGlobalSettings().getTerminalFontName()).deriveFont(Font.PLAIN,
-                scale(App.getGlobalSettings().getTerminalFontSize()));
+        Font terminalFont = FontUtils.loadTerminalFont(App.getGlobalSettings().getTerminalFontName());
+        if (terminalFont == null) {
+            terminalFont = new Font(Font.MONOSPACED, Font.PLAIN, 12);
+        }
+        return terminalFont.deriveFont(Font.PLAIN, scale(App.getGlobalSettings().getTerminalFontSize()));
     }
 
     @Override

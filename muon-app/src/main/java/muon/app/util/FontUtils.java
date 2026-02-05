@@ -18,10 +18,23 @@ import static java.util.Map.entry;
  */
 @Slf4j
 public class FontUtils {
+    private static final String SYSTEM_MONOSPACED_KEY = "Monospaced";
+    private static final String TERMINAL_GLYPH_SAMPLE = "─│┌┐└┘█▁▂▃▄▅▆▇▉⣀⣄⣤⣶";
+    private static final String[] TERMINAL_FONT_FALLBACK_ORDER = {
+            SYSTEM_MONOSPACED_KEY,
+            "DejaVuSansMono",
+            "Hack-Regular",
+            "JetBrainsMono-Regular",
+            "SourceCodePro-Regular",
+            "Inconsolata-Regular",
+            "FiraCode-Regular"
+    };
+
     FontUtils() {
 
     }
     public static final Map<String, String> TERMINAL_FONTS = Map.ofEntries(
+            entry(SYSTEM_MONOSPACED_KEY, "System Monospaced"),
             entry("DejaVuSansMono", "DejaVu Sans Mono"),
             entry("FiraCode-Regular", "Fira Code Regular"),
             entry("Inconsolata-Regular", "Inconsolata Regular"),
@@ -60,6 +73,48 @@ public class FontUtils {
 
     public static Font loadTerminalFont(String name) {
         log.debug("Loading font: {}", name);
+        Font requestedFont = loadTerminalFontInternal(name);
+        if (supportsTerminalGlyphs(requestedFont)) {
+            return requestedFont;
+        }
+
+        if (requestedFont != null) {
+            log.warn("Font {} does not support full terminal pseudographics. Falling back.", name);
+        } else {
+            log.warn("Unable to load font {}. Falling back.", name);
+        }
+
+        for (String fallbackName : TERMINAL_FONT_FALLBACK_ORDER) {
+            if (Objects.equals(fallbackName, name)) {
+                continue;
+            }
+            Font fallback = loadTerminalFontInternal(fallbackName);
+            if (supportsTerminalGlyphs(fallback)) {
+                log.info("Using fallback terminal font: {}", fallbackName);
+                return fallback;
+            }
+        }
+
+        if (requestedFont != null) {
+            return requestedFont;
+        }
+
+        return new Font(Font.MONOSPACED, Font.PLAIN, 12);
+    }
+
+    private static boolean supportsTerminalGlyphs(Font font) {
+        return font != null && font.canDisplayUpTo(TERMINAL_GLYPH_SAMPLE) == -1;
+    }
+
+    private static Font loadTerminalFontInternal(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+
+        if (SYSTEM_MONOSPACED_KEY.equals(name)) {
+            return new Font(Font.MONOSPACED, Font.PLAIN, 12);
+        }
+
         try (InputStream is = AppSkin.class.getResourceAsStream(String.format("/fonts/terminal/%s.ttf", name))) {
             Font font = Font.createFont(Font.TRUETYPE_FONT, Objects.requireNonNull(is));
             GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
@@ -68,7 +123,7 @@ public class FontUtils {
             return font.deriveFont(Font.PLAIN, 12.0f);
         } catch (Exception e) {
             log.error(e.getMessage(), e);
+            return null;
         }
-        return null;
     }
 }
