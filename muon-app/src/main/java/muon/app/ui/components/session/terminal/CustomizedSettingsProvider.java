@@ -4,8 +4,8 @@ import com.jediterm.core.Color;
 import com.jediterm.terminal.TerminalColor;
 import com.jediterm.terminal.TextStyle;
 import com.jediterm.terminal.emulator.ColorPalette;
-import com.jediterm.terminal.ui.settings.DefaultSettingsProvider;
 import com.jediterm.terminal.ui.TerminalActionPresentation;
+import com.jediterm.terminal.ui.settings.DefaultSettingsProvider;
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
 import muon.app.common.settings.Settings;
@@ -15,7 +15,10 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import java.awt.*;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
+import static muon.app.util.FontUtils.TERMINAL_FONTS_EMOJI_FALLBACK;
 import static muon.app.util.ScalingUtil.scale;
 
 /**
@@ -75,25 +78,25 @@ public class CustomizedSettingsProvider extends DefaultSettingsProvider {
     @Override
     public @NotNull TextStyle getDefaultStyle() {
         return new TextStyle(getTerminalColor(App.getGlobalSettings().getDefaultColorFg()),
-                getTerminalColor(App.getGlobalSettings().getDefaultColorBg()));
+                             getTerminalColor(App.getGlobalSettings().getDefaultColorBg()));
     }
 
     @Override
     public @NotNull TextStyle getFoundPatternColor() {
         return new TextStyle(getTerminalColor(App.getGlobalSettings().getDefaultFoundFg()),
-                getTerminalColor(App.getGlobalSettings().getDefaultFoundBg()));
+                             getTerminalColor(App.getGlobalSettings().getDefaultFoundBg()));
     }
 
     @Override
     public @NotNull TextStyle getSelectionColor() {
         return new TextStyle(getTerminalColor(App.getGlobalSettings().getDefaultSelectionFg()),
-                getTerminalColor(App.getGlobalSettings().getDefaultSelectionBg()));
+                             getTerminalColor(App.getGlobalSettings().getDefaultSelectionBg()));
     }
 
     @Override
     public TextStyle getHyperlinkColor() {
         return new TextStyle(getTerminalColor(App.getGlobalSettings().getDefaultHrefFg()),
-                getTerminalColor(App.getGlobalSettings().getDefaultHrefBg()));
+                             getTerminalColor(App.getGlobalSettings().getDefaultHrefBg()));
 
     }
 
@@ -104,6 +107,11 @@ public class CustomizedSettingsProvider extends DefaultSettingsProvider {
 
     @Override
     public boolean pasteOnMiddleMouseClick() {
+        return App.getGlobalSettings().isPuttyLikeCopyPaste();
+    }
+
+    @Override
+    public boolean forceActionOnMouseReporting() {
         return App.getGlobalSettings().isPuttyLikeCopyPaste();
     }
 
@@ -120,6 +128,20 @@ public class CustomizedSettingsProvider extends DefaultSettingsProvider {
             terminalFont = new Font(Font.MONOSPACED, Font.PLAIN, 12);
         }
         return terminalFont.deriveFont(Font.PLAIN, scale(App.getGlobalSettings().getTerminalFontSize()));
+    }
+
+    @Override
+    public Set<Font> getTerminalEmojiFonts() {
+        var fonts = new HashSet<Font>();
+        for (var terminalFont : TERMINAL_FONTS_EMOJI_FALLBACK.entrySet()) {
+            log.debug("Called terminal emoji font: {}", terminalFont.getValue());
+
+            Font font = FontUtils.loadTerminalFont(terminalFont.getKey());
+            if (font != null) {
+                fonts.add(font.deriveFont(Font.PLAIN, scale(App.getGlobalSettings().getTerminalFontSize())));
+            }
+        }
+        return fonts;
     }
 
     @Override
@@ -191,7 +213,7 @@ public class CustomizedSettingsProvider extends DefaultSettingsProvider {
 
     private KeyStroke getKeyStroke(String key) {
         return KeyStroke.getKeyStroke(App.getGlobalSettings().getKeyCodeMap().get(key),
-                App.getGlobalSettings().getKeyModifierMap().get(key));
+                                      App.getGlobalSettings().getKeyModifierMap().get(key));
     }
 
 }

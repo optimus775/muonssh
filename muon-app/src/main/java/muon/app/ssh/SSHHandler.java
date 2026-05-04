@@ -175,6 +175,7 @@ public class SSHHandler implements Closeable {
 
     private void connect(Deque<HopEntry> hopStack) throws IOException, OperationCancelledException {
         try {
+            closed.set(false);
             this.sessionContentPanel.disableUi();
             initializeSSHClient();
             if (hopStack.isEmpty()) {
@@ -235,7 +236,7 @@ public class SSHHandler implements Closeable {
                         passwordAuth(authenticated);
                         break;
                     default:
-                        throw new IllegalStateException("Unexpected value: " + authMethod);
+                        log.warn("Unexpected auth method: {}", authMethod);
                 }
 
                 if (authenticated.get()) {

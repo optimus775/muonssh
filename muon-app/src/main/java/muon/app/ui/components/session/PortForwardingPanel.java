@@ -17,13 +17,16 @@ import static muon.app.util.Constants.MEDIUM_TEXT_SIZE;
 import static muon.app.util.ScalingUtil.scale;
 import static muon.app.util.ScalingUtil.getScaledEmptyBorder;
 
-
 public class PortForwardingPanel extends JPanel {
     private final PFTableModel model;
     private final JTable table;
+    private final JButton btnAdd;
+    private final JButton btnDel;
+    private final JButton btnEdit;
     private SessionInfo info;
     private Runnable changeListener;
     private boolean suppressChangeEvents;
+    private boolean editable = true;
 
     public PortForwardingPanel() {
         super(new BorderLayout(10, 10));
@@ -37,14 +40,15 @@ public class PortForwardingPanel extends JPanel {
         scrollPane.setPreferredSize(scale(new Dimension(400, 200)));
 
         Box b1 = Box.createVerticalBox();
-        JButton btnAdd = new JButton(FontAwesomeContants.FA_PLUS);
+        btnAdd = new JButton(FontAwesomeContants.FA_PLUS);
         btnAdd.setFont(App.getCONTEXT().getSkin().getIconFont(MEDIUM_TEXT_SIZE));
-        JButton btnDel = new JButton(FontAwesomeContants.FA_MINUS);
+        btnDel = new JButton(FontAwesomeContants.FA_MINUS);
         btnDel.setFont(App.getCONTEXT().getSkin().getIconFont(MEDIUM_TEXT_SIZE));
-        JButton btnEdit = new JButton(FontAwesomeContants.FA_PENCIL);
+        btnEdit = new JButton(FontAwesomeContants.FA_PENCIL);
         btnEdit.setFont(App.getCONTEXT().getSkin().getIconFont(MEDIUM_TEXT_SIZE));
 
         btnAdd.addActionListener(e -> {
+            if (!editable) return;
             PortForwardingRule ent = addOrEditEntry(null);
             if (ent != null) {
                 model.addRule(ent);
@@ -53,6 +57,7 @@ public class PortForwardingPanel extends JPanel {
         });
 
         btnEdit.addActionListener(e -> {
+            if (!editable) return;
             int index = table.getSelectedRow();
             if (index != -1) {
                 PortForwardingRule ent = model.get(index);
@@ -64,6 +69,7 @@ public class PortForwardingPanel extends JPanel {
         });
 
         btnDel.addActionListener(e -> {
+            if (!editable) return;
             int index = table.getSelectedRow();
             if (index != -1) {
                 model.remove(index);
@@ -79,7 +85,6 @@ public class PortForwardingPanel extends JPanel {
 
         b1.add(btnDel);
         b1.add(Box.createVerticalStrut(10));
-
         this.add(lblTitle, BorderLayout.NORTH);
         this.add(scrollPane);
         this.add(b1, BorderLayout.EAST);
@@ -96,6 +101,15 @@ public class PortForwardingPanel extends JPanel {
         if (changeListener != null) {
             changeListener.run();
         }
+    }
+
+    public void setEditable(boolean editable) {
+        this.editable = editable;
+        table.setEnabled(editable);
+        table.setRowSelectionAllowed(editable);
+        btnAdd.setEnabled(editable);
+        btnEdit.setEnabled(editable);
+        btnDel.setEnabled(editable);
     }
 
     private void updatePFRules() {

@@ -9,7 +9,7 @@ title: MuonSSH
 website: https://github.com/devlinx9/muon-ssh
 issues: https://github.com/devlinx9/muon-ssh/issues
 grade: stable
-base: core22
+base: core24
 icon: snap/gui/muonssh.png
 confinement: strict
 
