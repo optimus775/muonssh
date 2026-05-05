@@ -6,13 +6,17 @@ import muon.app.App;
 import muon.app.common.FileInfo;
 import muon.app.ui.components.session.files.FileBrowser;
 import muon.app.util.FormatUtils;
+import muon.app.util.PathUtils;
 import muon.app.util.enums.FileType;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.time.format.DateTimeFormatter;
+import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
@@ -39,11 +43,12 @@ public class PropertiesDialog extends JDialog {
 
     static final int[] PERMS = new int[]{S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP,
                                          S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH, S_ISUID, S_ISGID, S_ISVTX};
-    private static final String USER_GROUP_REGEX = "^[^\\s]+\\s+[^\\s]+\\s+([^\\s]+)\\s+([^\\s]+)";
     private static final Pattern DU_PATTERN = Pattern
             .compile("([\\d]+)\\s+(.+)");
     private static final Pattern DF_PATTERN = Pattern.compile(
             "[^\\s]+\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+%)\\s+[^\\s]+");
+    private static final String GETENT_PASSWD_COMMAND = "getent passwd";
+    private static final String GETENT_GROUP_COMMAND = "getent group";
     private final JCheckBox[] chkPermissons;
     private final JTextField txtSize;
     private final JTextField txtFreeSpace;
@@ -51,6 +56,7 @@ public class PropertiesDialog extends JDialog {
     private final AtomicBoolean modified = new AtomicBoolean(false);
     private final JButton btnOK;
     private final JCheckBox chkRecursive;
+    private final boolean multimode;
 
     @Getter
     private int dialogResult = JOptionPane.CANCEL_OPTION;
@@ -61,15 +67,27 @@ public class PropertiesDialog extends JDialog {
     private JTextField txtGroup;
     private JTextField txtModified;
     private JTextField txtPath;
+    private JTextField txtMode;
+    private JTextField txtUid;
+    private JTextField txtGid;
     private JTextField txtFileCount;
     private JButton btnCalculate1;
     private JButton btnCalculate2;
-    private Pattern pattern;
+    private RemoteIdentityMap userIdentityMap = RemoteIdentityMap.EMPTY;
+    private RemoteIdentityMap groupIdentityMap = RemoteIdentityMap.EMPTY;
+    private boolean updatingFields;
+    private boolean permissionsModified;
+    private boolean ownerModified;
+    private boolean groupModified;
+    private int originalPermissions = -1;
+    private int originalUid = -1;
+    private int originalGid = -1;
 
     public PropertiesDialog(FileBrowser holder, Window window,
                             boolean multimode) {
         super(window);
         this.fileBrowser = holder;
+        this.multimode = multimode;
         setResizable(true);
         setModal(true);
         setTitle("Properties");
@@ -80,16 +98,13 @@ public class PropertiesDialog extends JDialog {
         }
 
         chkPermissons[9] = generateChkPermission("SUID");
-        chkPermissons[10] = generateChkPermission("GUID");
+        chkPermissons[10] = generateChkPermission("SGID");
         chkPermissons[11] = generateChkPermission("StickyBit");
 
         chkRecursive = new JCheckBox("Apply Recursive changes");
 
         chkRecursive.setAlignmentX(Box.LEFT_ALIGNMENT);
-        chkRecursive.addActionListener(e -> {
-            modified.set(true);
-            updateButtonState();
-        });
+        chkRecursive.addActionListener(e -> updateButtonState());
 
 
         JLabel lblOwner = new JLabel("Owner permissions");
@@ -127,8 +142,23 @@ public class PropertiesDialog extends JDialog {
             boxFree.add(btnGetDiskSpaceUsed);
             b.add(boxFree);
             b.add(Box.createVerticalStrut(10));
+
+            txtOwner = new JTextField(30);
+            b.add(addPropertyField(txtOwner, "Owner", true));
+            b.add(Box.createVerticalStrut((10)));
+
+            txtUid = new JTextField(30);
+            b.add(addPropertyField(txtUid, "UID", true));
+            b.add(Box.createVerticalStrut((10)));
+
+            txtGroup = new JTextField(30);
+            b.add(addPropertyField(txtGroup, "Group", true));
+            b.add(Box.createVerticalStrut((10)));
+
+            txtGid = new JTextField(30);
+            b.add(addPropertyField(txtGid, "GID", true));
+            b.add(Box.createVerticalStrut((10)));
         } else {
-            this.pattern = Pattern.compile(USER_GROUP_REGEX);
             txtName = new JTextField(30);
             b.add(addPropertyField(txtName, "Name"));
             b.add(Box.createVerticalStrut(10));
@@ -150,7 +180,11 @@ public class PropertiesDialog extends JDialog {
             b.add(Box.createVerticalStrut(10));
 
             txtOwner = new JTextField(30);
-            b.add(addPropertyField(txtOwner, "Owner"));
+            b.add(addPropertyField(txtOwner, "Owner", true));
+            b.add(Box.createVerticalStrut((10)));
+
+            txtUid = new JTextField(30);
+            b.add(addPropertyField(txtUid, "UID", true));
             b.add(Box.createVerticalStrut((10)));
 
             txtType = new JTextField(30);
@@ -158,7 +192,11 @@ public class PropertiesDialog extends JDialog {
             b.add(Box.createVerticalStrut((10)));
 
             txtGroup = new JTextField(30);
-            b.add(addPropertyField(txtGroup, "Group"));
+            b.add(addPropertyField(txtGroup, "Group", true));
+            b.add(Box.createVerticalStrut((10)));
+
+            txtGid = new JTextField(30);
+            b.add(addPropertyField(txtGid, "GID", true));
             b.add(Box.createVerticalStrut((10)));
 
             txtModified = new JTextField(30);
@@ -174,6 +212,11 @@ public class PropertiesDialog extends JDialog {
             b.add(boxFree);
             b.add(Box.createVerticalStrut(10));
         }
+
+        txtMode = new JTextField(30);
+        b.add(addPropertyField(txtMode, "Mode", true));
+        b.add(Box.createVerticalStrut(10));
+        installFieldListeners();
 
         b.add(lblOwner);
 
@@ -201,12 +244,15 @@ public class PropertiesDialog extends JDialog {
         b.add(chkRecursive);
 
         Box b2 = Box.createHorizontalBox();
-        btnOK = new JButton("Change permissions");
+        btnOK = new JButton("Apply changes");
         btnOK.setEnabled(false);
         btnOK.addActionListener(e -> {
-            dialogResult = JOptionPane.OK_OPTION;
-            chmodAsync(getPermissions(), details, chkRecursive.isSelected());
-            dispose();
+            FilePropertyChanges changes = getChanges();
+            if (changes != null && changes.hasChanges()) {
+                dialogResult = JOptionPane.OK_OPTION;
+                applyChangesAsync(changes, details, chkRecursive.isSelected());
+                dispose();
+            }
         });
         JButton btnCancel = new JButton(App.getCONTEXT().getBundle().getString("cancel"));
         btnCancel.addActionListener(e -> {
@@ -239,19 +285,19 @@ public class PropertiesDialog extends JDialog {
         var chkPermission = new JCheckBox(label);
         chkPermission.setAlignmentX(Box.LEFT_ALIGNMENT);
         chkPermission.addActionListener(e -> {
-            modified.set(true);
+            if (updatingFields) {
+                return;
+            }
+            permissionsModified = true;
             updateButtonState();
+            updateModeFromCheckboxes();
         });
 
         return chkPermission;
     }
 
     private boolean[] extractPermissions(int permissions) {
-        boolean[] perms = new boolean[12];
-        for (int i = 0; i < 12; i++) {
-            perms[i] = (permissions & PropertiesDialog.PERMS[i]) != 0;
-        }
-        return perms;
+        return FilePropertyMode.permissionsToSelection(permissions);
     }
 
     public void setDetails(FileInfo details) {
@@ -265,38 +311,46 @@ public class PropertiesDialog extends JDialog {
         chkRecursive.setForeground(UIManager.getColor(
                 details.getType() != FileType.DIRECTORY ? "Label.disabledForeground" : "Label.foreground"));
         int permissions = details.getPermission();
-        if (this.pattern != null && details.getExtra() != null
-            && !details.getExtra().isEmpty()) {
-            Matcher matcher = pattern.matcher(details.getExtra());
-            if (matcher.find()) {
-                String user = matcher.group(1);
-                String group = matcher.group(2);
-
-                txtOwner.setText(user);
-                txtGroup.setText(group);
-            }
+        originalPermissions = permissions;
+        originalUid = details.getUid();
+        originalGid = details.getGid();
+        updatingFields = true;
+        try {
+            txtOwner.setText(valueOrEmpty(details.getUser()));
+            txtUid.setText(formatId(details.getUid()));
+            txtGroup.setText(valueOrEmpty(details.getGroup()));
+            txtGid.setText(formatId(details.getGid()));
+            this.txtModified.setText(details.getLastModified()
+                                             .format(DateTimeFormatter.ISO_DATE_TIME));
+            this.txtName.setText(details.getName());
+            this.txtPath.setText(details.getPath());
+            this.txtSize.setText(details.getType() == FileType.DIRECTORY
+                                 || details.getType() == FileType.DIR_LINK ? "---"
+                                                                           : FormatUtils.humanReadableByteCount(details.getSize(),
+                                                                                                                true));
+            this.txtType.setText(details.getType() == FileType.DIRECTORY
+                                 || details.getType() == FileType.DIR_LINK ? "Directory"
+                                                                           : "File");
+            setPermissionCheckboxes(permissions);
+            txtMode.setText(FilePropertyMode.formatOctalMode(permissions));
+        } finally {
+            updatingFields = false;
         }
-        this.txtModified.setText(details.getLastModified()
-                                         .format(DateTimeFormatter.ISO_DATE_TIME));
-        this.txtName.setText(details.getName());
-        this.txtPath.setText(details.getPath());
-        this.txtSize.setText(details.getType() == FileType.DIRECTORY
-                             || details.getType() == FileType.DIR_LINK ? "---"
-                                                                       : FormatUtils.humanReadableByteCount(details.getSize(),
-                                                                                                            true));
-        this.txtType.setText(details.getType() == FileType.DIRECTORY
-                             || details.getType() == FileType.DIR_LINK ? "Directory"
-                                                                       : "File");
-        boolean[] perms = extractPermissions(permissions);
-        for (int i = 0; i < 12; i++) {
-            chkPermissons[i].setSelected(perms[i]);
-        }
+        permissionsModified = false;
+        ownerModified = false;
+        groupModified = false;
+        modified.set(false);
+        loadIdentityMapsAsync();
+        updateButtonState();
     }
 
     public void setMultipleDetails(FileInfo[] files) {
         this.details = files;
         boolean hasAnyDir = false;
         long totalSize = 0;
+        originalPermissions = commonPermissions(files);
+        originalUid = commonUid(files);
+        originalGid = commonGid(files);
         for (FileInfo file : files) {
             if (file.getType() == FileType.DIR_LINK
                 || file.getType() == FileType.DIRECTORY) {
@@ -315,6 +369,29 @@ public class PropertiesDialog extends JDialog {
                     FormatUtils.humanReadableByteCount(totalSize, true));
         }
         btnCalculate1.setEnabled(hasAnyDir);
+        chkRecursive.setEnabled(hasAnyDir);
+        chkRecursive.setForeground(UIManager.getColor(
+                hasAnyDir ? "Label.foreground" : "Label.disabledForeground"));
+        updatingFields = true;
+        try {
+            txtOwner.setText(commonText(files, true));
+            txtUid.setText(formatId(originalUid));
+            txtGroup.setText(commonText(files, false));
+            txtGid.setText(formatId(originalGid));
+            if (originalPermissions >= 0) {
+                setPermissionCheckboxes(originalPermissions);
+                txtMode.setText(FilePropertyMode.formatOctalMode(originalPermissions));
+            } else {
+                txtMode.setText("");
+                setPermissionCheckboxes(0);
+            }
+        } finally {
+            updatingFields = false;
+        }
+        permissionsModified = false;
+        ownerModified = false;
+        groupModified = false;
+        modified.set(false);
         int fc = 0;
         int dc = 0;
         for (FileInfo f : files) {
@@ -326,22 +403,84 @@ public class PropertiesDialog extends JDialog {
             }
         }
         txtFileCount.setText(fc + " files, " + dc + " folders");
+        loadIdentityMapsAsync();
+        updateButtonState();
+    }
+
+    private int commonPermissions(FileInfo[] files) {
+        if (files.length == 0) {
+            return -1;
+        }
+        int permissions = files[0].getPermission();
+        for (FileInfo file : files) {
+            if (file.getPermission() != permissions) {
+                return -1;
+            }
+        }
+        return permissions;
+    }
+
+    private int commonUid(FileInfo[] files) {
+        if (files.length == 0 || files[0].getUid() < 0) {
+            return -1;
+        }
+        int uid = files[0].getUid();
+        for (FileInfo file : files) {
+            if (file.getUid() != uid) {
+                return -1;
+            }
+        }
+        return uid;
+    }
+
+    private int commonGid(FileInfo[] files) {
+        if (files.length == 0 || files[0].getGid() < 0) {
+            return -1;
+        }
+        int gid = files[0].getGid();
+        for (FileInfo file : files) {
+            if (file.getGid() != gid) {
+                return -1;
+            }
+        }
+        return gid;
+    }
+
+    private String commonText(FileInfo[] files, boolean ownerField) {
+        if (files.length == 0) {
+            return "";
+        }
+        String value = valueOrEmpty(ownerField ? files[0].getUser() : files[0].getGroup());
+        if (value.isEmpty()) {
+            return "";
+        }
+        for (FileInfo file : files) {
+            String next = valueOrEmpty(ownerField ? file.getUser() : file.getGroup());
+            if (!value.equals(next)) {
+                return "";
+            }
+        }
+        return value;
     }
 
     public int getPermissions() {
-        int perms = 0;
-        for (int i = 0; i < 12; i++) {
-            if (chkPermissons[i].isSelected()) {
-                perms |= PropertiesDialog.PERMS[i];
-            }
+        boolean[] selected = new boolean[chkPermissons.length];
+        for (int i = 0; i < chkPermissons.length; i++) {
+            selected[i] = chkPermissons[i].isSelected();
         }
-        return perms;
+        return FilePropertyMode.selectionToPermissions(selected);
     }
 
     private Component addPropertyField(JTextField txt, String label) {
-        txt.setEditable(false);
-        txt.setBackground(App.getCONTEXT().getSkin().getDefaultBackground());
-        txt.setBorder(null);
+        return addPropertyField(txt, label, false);
+    }
+
+    private Component addPropertyField(JTextField txt, String label, boolean editable) {
+        txt.setEditable(editable);
+        if (!editable) {
+            txt.setBackground(App.getCONTEXT().getSkin().getDefaultBackground());
+            txt.setBorder(null);
+        }
         JLabel lblFileName = new JLabel(label);
         lblFileName.setPreferredSize(
                 scale(new Dimension((150), lblFileName.getPreferredSize().height)));
@@ -350,6 +489,203 @@ public class PropertiesDialog extends JDialog {
         b11.add(lblFileName);
         b11.add(txt);
         return b11;
+    }
+
+    private void installFieldListeners() {
+        addDocumentChangeListener(txtMode, this::onModeTextChanged);
+        addDocumentChangeListener(txtOwner, () -> onIdentityNameChanged(txtOwner, txtUid, userIdentityMap, true));
+        addDocumentChangeListener(txtUid, () -> onIdentityIdChanged(txtUid, txtOwner, userIdentityMap, true));
+        addDocumentChangeListener(txtGroup, () -> onIdentityNameChanged(txtGroup, txtGid, groupIdentityMap, false));
+        addDocumentChangeListener(txtGid, () -> onIdentityIdChanged(txtGid, txtGroup, groupIdentityMap, false));
+    }
+
+    private void addDocumentChangeListener(JTextField field, Runnable runnable) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                runnable.run();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                runnable.run();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                runnable.run();
+            }
+        });
+    }
+
+    private void onModeTextChanged() {
+        if (updatingFields) {
+            return;
+        }
+        permissionsModified = true;
+        modified.set(true);
+        OptionalInt mode = FilePropertyMode.parseOctalMode(txtMode.getText());
+        if (mode.isPresent()) {
+            setPermissionCheckboxes(mode.getAsInt());
+        }
+        updateButtonState();
+    }
+
+    private void onIdentityNameChanged(JTextField nameField, JTextField idField, RemoteIdentityMap identityMap,
+                                       boolean ownerField) {
+        if (updatingFields) {
+            return;
+        }
+        modified.set(true);
+        markIdentityModified(ownerField);
+        String name = nameField.getText().trim();
+        updatingFields = true;
+        try {
+            if (!name.isEmpty()) {
+                Integer id = identityMap.getId(name);
+                idField.setText(id == null ? "" : String.valueOf(id));
+            }
+        } finally {
+            updatingFields = false;
+        }
+        updateButtonState();
+    }
+
+    private void onIdentityIdChanged(JTextField idField, JTextField nameField, RemoteIdentityMap identityMap,
+                                     boolean ownerField) {
+        if (updatingFields) {
+            return;
+        }
+        modified.set(true);
+        markIdentityModified(ownerField);
+        OptionalInt id = parseNonNegativeId(idField.getText());
+        updatingFields = true;
+        try {
+            if (id.isPresent()) {
+                String name = identityMap.getName(id.getAsInt());
+                nameField.setText(name == null ? "" : name);
+            }
+        } finally {
+            updatingFields = false;
+        }
+        updateButtonState();
+    }
+
+    private void markIdentityModified(boolean ownerField) {
+        if (ownerField) {
+            ownerModified = true;
+        } else {
+            groupModified = true;
+        }
+    }
+
+    private void setPermissionCheckboxes(int permissions) {
+        boolean wasUpdating = updatingFields;
+        updatingFields = true;
+        try {
+            boolean[] perms = extractPermissions(permissions);
+            for (int i = 0; i < chkPermissons.length; i++) {
+                chkPermissons[i].setSelected(perms[i]);
+            }
+        } finally {
+            updatingFields = wasUpdating;
+        }
+    }
+
+    private void updateModeFromCheckboxes() {
+        boolean wasUpdating = updatingFields;
+        updatingFields = true;
+        try {
+            txtMode.setText(FilePropertyMode.formatOctalMode(getPermissions()));
+        } finally {
+            updatingFields = wasUpdating;
+        }
+        updateButtonState();
+    }
+
+    private void loadIdentityMapsAsync() {
+        fileBrowser.getHolder().EXECUTOR.submit(() -> {
+            RemoteIdentityMap users = RemoteIdentityMap.EMPTY;
+            RemoteIdentityMap groups = RemoteIdentityMap.EMPTY;
+            try {
+                StringBuilder output = new StringBuilder();
+                if (fileBrowser.getSessionInstance().exec(GETENT_PASSWD_COMMAND,
+                                                           new AtomicBoolean(false), output,
+                                                           new StringBuilder()) == 0) {
+                    users = RemoteIdentityMap.parsePasswd(output.toString());
+                }
+
+                output = new StringBuilder();
+                if (fileBrowser.getSessionInstance().exec(GETENT_GROUP_COMMAND,
+                                                           new AtomicBoolean(false), output,
+                                                           new StringBuilder()) == 0) {
+                    groups = RemoteIdentityMap.parseGroup(output.toString());
+                }
+            } catch (Exception e) {
+                log.debug("Failed to load remote users/groups", e);
+            }
+
+            RemoteIdentityMap loadedUsers = users;
+            RemoteIdentityMap loadedGroups = groups;
+            SwingUtilities.invokeLater(() -> {
+                if (!isDisplayable()) {
+                    return;
+                }
+                userIdentityMap = loadedUsers;
+                groupIdentityMap = loadedGroups;
+                syncIdentityFieldsFromMaps();
+                updateButtonState();
+            });
+        });
+    }
+
+    private void syncIdentityFieldsFromMaps() {
+        updatingFields = true;
+        try {
+            syncIdentityFieldFromMap(txtOwner, txtUid, userIdentityMap);
+            syncIdentityFieldFromMap(txtGroup, txtGid, groupIdentityMap);
+        } finally {
+            updatingFields = false;
+        }
+    }
+
+    private void syncIdentityFieldFromMap(JTextField nameField, JTextField idField, RemoteIdentityMap identityMap) {
+        OptionalInt id = parseNonNegativeId(idField.getText());
+        if (id.isPresent()) {
+            String mappedName = identityMap.getName(id.getAsInt());
+            if (mappedName != null) {
+                nameField.setText(mappedName);
+            }
+            return;
+        }
+
+        String name = nameField.getText().trim();
+        if (!name.isEmpty()) {
+            Integer mappedId = identityMap.getId(name);
+            if (mappedId != null) {
+                idField.setText(String.valueOf(mappedId));
+            }
+        }
+    }
+
+    private OptionalInt parseNonNegativeId(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return OptionalInt.empty();
+        }
+        try {
+            int id = Integer.parseInt(text.trim());
+            return id < 0 ? OptionalInt.empty() : OptionalInt.of(id);
+        } catch (NumberFormatException e) {
+            return OptionalInt.empty();
+        }
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String formatId(int id) {
+        return id < 0 ? "" : String.valueOf(id);
     }
 
     private void calculateDirSize() {
@@ -504,11 +840,60 @@ public class PropertiesDialog extends JDialog {
         });
     }
 
-    private void chmodAsync(int perm, FileInfo[] paths, boolean isUpdateRecursive) {
+    private FilePropertyChanges getChanges() {
+        OptionalInt mode = FilePropertyMode.parseOctalMode(txtMode.getText());
+        if ((!multimode || permissionsModified) && mode.isEmpty()) {
+            return null;
+        }
+
+        FilePropertyChanges changes = new FilePropertyChanges();
+        if (multimode) {
+            if (permissionsModified && mode.isPresent()) {
+                if (originalPermissions < 0 || mode.getAsInt() != originalPermissions) {
+                    changes.permissions = mode.getAsInt();
+                }
+            }
+            return applyIdentityChanges(changes) ? changes : null;
+        }
+
+        if (mode.isPresent() && mode.getAsInt() != originalPermissions) {
+            changes.permissions = mode.getAsInt();
+        }
+
+        return applyIdentityChanges(changes) ? changes : null;
+    }
+
+    private boolean applyIdentityChanges(FilePropertyChanges changes) {
+        if (ownerModified) {
+            RemoteIdentityMap.Resolution owner = RemoteIdentityMap.resolve(txtOwner.getText(), txtUid.getText(),
+                                                                           userIdentityMap);
+            if (!owner.isValid()) {
+                return false;
+            }
+            if (owner.getId() != null && (originalUid < 0 || owner.getId() != originalUid)) {
+                changes.uid = owner.getId();
+            }
+        }
+
+        if (groupModified) {
+            RemoteIdentityMap.Resolution group = RemoteIdentityMap.resolve(txtGroup.getText(), txtGid.getText(),
+                                                                           groupIdentityMap);
+            if (!group.isValid()) {
+                return false;
+            }
+            if (group.getId() != null && (originalGid < 0 || group.getId() != originalGid)) {
+                changes.gid = group.getId();
+            }
+        }
+
+        return true;
+    }
+
+    private void applyChangesAsync(FilePropertyChanges changes, FileInfo[] paths, boolean isUpdateRecursive) {
         AtomicBoolean stopFlag = new AtomicBoolean(false);
         JDialog dlg = new JDialog(this);
         dlg.setModal(true);
-        JLabel lbl = new JLabel("Calculating...");
+        JLabel lbl = new JLabel("Applying...");
         lbl.setBorder(getScaledEmptyBorder(10, 10, 10, 10));
         dlg.add(lbl);
         dlg.addWindowListener(new WindowAdapter() {
@@ -524,8 +909,8 @@ public class PropertiesDialog extends JDialog {
         fileBrowser.getHolder().EXECUTOR.submit(() -> {
             try {
                 for (FileInfo path : paths) {
-                    chmodRecursive(perm, path.getPath(), isUpdateRecursive);
-                    log.info("Permissions changed");
+                    applyChangesRecursive(changes, path.getPath(), isUpdateRecursive && path.isDirectory(), stopFlag);
+                    log.info("Properties changed");
                 }
                 modified.set(true);
             } catch (Exception e) {
@@ -547,19 +932,30 @@ public class PropertiesDialog extends JDialog {
     }
 
     private void updateButtonState() {
-        btnOK.setEnabled(modified.get());
+        if (btnOK == null) {
+            return;
+        }
+        FilePropertyChanges changes = getChanges();
+        btnOK.setEnabled(changes != null && changes.hasChanges());
     }
 
-    private void chmodRecursive(int perm, String path, boolean isUpdateRecursive) throws Exception {
+    private void applyChangesRecursive(FilePropertyChanges changes, String path, boolean isUpdateRecursive,
+                                       AtomicBoolean stopFlag) throws Exception {
+        if (stopFlag.get()) {
+            return;
+        }
 
-        fileBrowser.getSSHFileSystem().chmod(perm, path);
-        fileBrowser.getSSHDirectoryCache().remove(path);
+        applyChangesToPath(changes, path);
+        invalidateDirectoryCache(path);
 
         if (!isUpdateRecursive) {
             return;
         }
 
         for (var item : fileBrowser.getSSHFileSystem().list(path)) {
+            if (stopFlag.get()) {
+                return;
+            }
             String childPath = item.getPath();
 
             // Skip "." and ".."
@@ -569,11 +965,44 @@ public class PropertiesDialog extends JDialog {
             log.debug(childPath);
 
             if (item.isDirectory()) {
-                chmodRecursive(perm, childPath, isUpdateRecursive);
+                applyChangesRecursive(changes, childPath, true, stopFlag);
             } else {
-                fileBrowser.getSSHFileSystem().chmod(perm, childPath);
-                fileBrowser.getSSHDirectoryCache().remove(childPath);
+                applyChangesToPath(changes, childPath);
+                invalidateDirectoryCache(childPath);
             }
+        }
+    }
+
+    private void applyChangesToPath(FilePropertyChanges changes, String path) throws Exception {
+        if (changes.uid != null) {
+            fileBrowser.getSSHFileSystem().chown(path, changes.uid);
+        }
+        if (changes.gid != null) {
+            fileBrowser.getSSHFileSystem().chgrp(path, changes.gid);
+        }
+        if (changes.permissions != null) {
+            fileBrowser.getSSHFileSystem().chmod(changes.permissions, path);
+        }
+    }
+
+    private void invalidateDirectoryCache(String path) {
+        fileBrowser.getSSHDirectoryCache().remove(path);
+        String parent = PathUtils.getParent(path);
+        if (parent != null) {
+            fileBrowser.getSSHDirectoryCache().remove(parent);
+            if (parent.endsWith("/") && parent.length() > 1) {
+                fileBrowser.getSSHDirectoryCache().remove(parent.substring(0, parent.length() - 1));
+            }
+        }
+    }
+
+    private static class FilePropertyChanges {
+        private Integer permissions;
+        private Integer uid;
+        private Integer gid;
+
+        private boolean hasChanges() {
+            return permissions != null || uid != null || gid != null;
         }
     }
 }

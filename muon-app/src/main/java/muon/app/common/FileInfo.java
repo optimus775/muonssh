@@ -28,6 +28,9 @@ public class FileInfo implements Serializable {
     private String permissionString;
     private String extra;
     private String user;
+    private String group;
+    private int uid = -1;
+    private int gid = -1;
     private boolean hidden;
 
     public FileInfo(String name, String path, long size, FileType type,
@@ -46,24 +49,23 @@ public class FileInfo implements Serializable {
         this.created = TimeUtils.toDateTime(created);
         this.extra = extra;
         if (this.extra != null && !this.extra.isEmpty()) {
-            this.user = getUserName();
+            setUserGroupFromExtra();
         }
         this.hidden = hidden;
     }
 
-    private String getUserName() {
+    private void setUserGroupFromExtra() {
         try {
             if (this.extra != null && !this.extra.isEmpty()) {
                 Matcher matcher = USER_REGEX.matcher(this.extra);
                 if (matcher.find()) {
-                    return matcher.group(1);
+                    this.user = matcher.group(1);
+                    this.group = matcher.group(2);
                 }
             }
         } catch (Exception e) {
             log.error(e.getMessage(), e);
         }
-
-        return "";
     }
 
     public void setLastModified(long lastModified) {
