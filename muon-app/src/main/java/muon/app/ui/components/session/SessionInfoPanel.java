@@ -2,10 +2,13 @@ package muon.app.ui.components.session;
 
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
+import muon.app.ui.components.common.SkinnedScrollPane;
 import muon.app.ui.components.common.SkinnedTextArea;
 import muon.app.ui.components.common.SkinnedTextField;
 import muon.app.ui.components.common.TabbedPanel;
 import muon.app.util.enums.JumpType;
+import muon.app.vps.ProviderRecord;
+import muon.app.vps.VpsProviderRepository;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -15,7 +18,10 @@ import javax.swing.text.JTextComponent;
 import java.awt.*;
 import java.io.File;
 import java.nio.file.Files;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static muon.app.util.ScalingUtil.*;
 
@@ -48,6 +54,26 @@ public class SessionInfoPanel extends JPanel {
     private SessionInfo info;
     private JCheckBox chkUseX11Forwarding;
     private JCheckBox chkSftpOnly;
+    private final VpsProviderRepository providerRepository = new VpsProviderRepository();
+    private DefaultComboBoxModel<ProviderRecord> providerModel;
+    private JComboBox<ProviderRecord> cmbProvider;
+    private JTextField inpAccountId;
+    private JComboBox<String> cmbBillingPeriodType;
+    private JComboBox<String> cmbBillingCycle;
+    private SpinnerNumberModel billingCycleDaysModel;
+    private JTextField inpPrice;
+    private JTextField inpCurrency;
+    private JTextField inpNextPaymentDate;
+    private JTextField inpHourlyRate;
+    private JTextField inpNextBalanceCheckDate;
+    private JTextField inpCancelByDate;
+    private JCheckBox chkAutoPay;
+    private JComboBox<String> cmbVpsStatus;
+    private JTextField inpTags;
+    private SkinnedTextArea inpDescription;
+    private SkinnedTextArea inpExternalRefs;
+    private JCheckBox chkSyncPrivateKey;
+    private JCheckBox chkSyncPublicKey;
     private Runnable changeListener;
     private boolean suppressChangeEvents;
     private boolean editable = true;
@@ -67,6 +93,9 @@ public class SessionInfoPanel extends JPanel {
     private void notifyChange() {
         if (suppressChangeEvents) {
             return;
+        }
+        if (info != null) {
+            info.setUpdatedAt(System.currentTimeMillis());
         }
         if (changeListener != null) {
             changeListener.run();
@@ -234,7 +263,31 @@ public class SessionInfoPanel extends JPanel {
             showError("User name can not be left blank");
             return false;
         }
+        if (!isValidOptionalDate(inpNextPaymentDate.getText())) {
+            showError("Next payment date must be empty or use YYYY-MM-DD");
+            return false;
+        }
+        if (!isValidOptionalDate(inpCancelByDate.getText())) {
+            showError("Cancel-by date must be empty or use YYYY-MM-DD");
+            return false;
+        }
+        if (!isValidOptionalDate(inpNextBalanceCheckDate.getText())) {
+            showError("Next balance check date must be empty or use YYYY-MM-DD");
+            return false;
+        }
         return true;
+    }
+
+    private boolean isValidOptionalDate(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        try {
+            LocalDate.parse(value.trim());
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
+        }
     }
 
     public void setSessionInfo(SessionInfo info) {
@@ -258,6 +311,7 @@ public class SessionInfoPanel extends JPanel {
             setJumpHostDetails(info.isUseJumpHosts(), info.getJumpType(), info.getJumpHosts());
             this.chkUseX11Forwarding.setSelected(info.isUseX11Forwarding());
             this.chkSftpOnly.setSelected(info.isSftpOnly());
+            setVpsFields(info);
 
             panPF.setInfo(info);
         } finally {
@@ -332,6 +386,7 @@ public class SessionInfoPanel extends JPanel {
         setBorder(getScaledEmptyBorder(10, 0, 10, 0));
         TabbedPanel tabs = new TabbedPanel();
         tabs.addTab(App.getCONTEXT().getBundle().getString("connection"), createConnectionPanel());
+        tabs.addTab("Description", createDescriptionPanel());
         tabs.addTab(App.getCONTEXT().getBundle().getString("directories"), createDirectoryPanel());
         proxyPanel = createProxyPanel();
         tabs.addTab(App.getCONTEXT().getBundle().getString("proxy"), proxyPanel);
@@ -341,6 +396,293 @@ public class SessionInfoPanel extends JPanel {
         tabs.addTab(App.getCONTEXT().getBundle().getString("port_forwarding"), portForwardingPanel);
         this.add(tabs);
         tabs.setSelectedIndex(0);
+    }
+
+    public void reloadProviders() {
+        if (providerModel == null) {
+            return;
+        }
+        String selectedId = info == null ? null : info.getProviderId();
+        ProviderRecord selected = getSelectedProvider();
+        if ((selectedId == null || selectedId.isBlank()) && selected != null) {
+            selectedId = selected.getId();
+        }
+        providerModel.removeAllElements();
+        ProviderRecord empty = new ProviderRecord();
+        providerModel.addElement(empty);
+        for (ProviderRecord provider : providerRepository.listProviders()) {
+            providerModel.addElement(provider);
+        }
+        selectProvider(selectedId, info == null ? null : info.getProvider());
+    }
+
+    private Component createDescriptionPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        Insets labelInset = scaleInsets(14, 10, 0, 10);
+        Insets fieldInset = scaleInsets(5, 10, 0, 10);
+
+        providerModel = new DefaultComboBoxModel<>();
+        cmbProvider = new JComboBox<>(providerModel);
+        reloadProviders();
+        cmbProvider.addActionListener(e -> {
+            if (info != null) {
+                ProviderRecord provider = getSelectedProvider();
+                info.setProviderId(provider == null ? null : provider.getId());
+                info.setProvider(provider == null ? null : provider.getName());
+                info.setProviderUrl(provider == null ? null : firstNonBlank(provider.getBillingUrl(), provider.getWebsite()));
+                touchAndNotify();
+            }
+        });
+        inpAccountId = new SkinnedTextField(10);
+        bindText(inpAccountId, value -> info.setAccountId(value));
+
+        cmbBillingPeriodType = new JComboBox<>(new String[]{"fixed_period", "hourly_balance"});
+        cmbBillingPeriodType.addActionListener(e -> {
+            if (info != null) {
+                info.setBillingPeriodType((String) cmbBillingPeriodType.getSelectedItem());
+                touchAndNotify();
+            }
+        });
+        cmbBillingCycle = new JComboBox<>(new String[]{"monthly", "yearly", "custom"});
+        cmbBillingCycle.addActionListener(e -> {
+            if (info != null) {
+                info.setBillingCycle((String) cmbBillingCycle.getSelectedItem());
+                touchAndNotify();
+            }
+        });
+        billingCycleDaysModel = new SpinnerNumberModel(30, 1, 3650, 1);
+        billingCycleDaysModel.addChangeListener(e -> {
+            if (info != null) {
+                info.setBillingCycleDays((Integer) billingCycleDaysModel.getValue());
+                info.setBillingPeriodDays((Integer) billingCycleDaysModel.getValue());
+                touchAndNotify();
+            }
+        });
+
+        inpPrice = new SkinnedTextField(10);
+        bindText(inpPrice, value -> info.setPrice(value));
+        inpCurrency = new SkinnedTextField(10);
+        bindText(inpCurrency, value -> info.setCurrency(value));
+        inpNextPaymentDate = new SkinnedTextField(10);
+        inpNextPaymentDate.setToolTipText("YYYY-MM-DD");
+        bindText(inpNextPaymentDate, value -> info.setNextPaymentDate(value));
+        inpHourlyRate = new SkinnedTextField(10);
+        bindText(inpHourlyRate, value -> info.setHourlyRate(value));
+        inpNextBalanceCheckDate = new SkinnedTextField(10);
+        inpNextBalanceCheckDate.setToolTipText("YYYY-MM-DD");
+        bindText(inpNextBalanceCheckDate, value -> info.setNextBalanceCheckDate(value));
+        inpCancelByDate = new SkinnedTextField(10);
+        inpCancelByDate.setToolTipText("YYYY-MM-DD");
+        bindText(inpCancelByDate, value -> info.setCancelByDate(value));
+
+        chkAutoPay = new JCheckBox("Auto-pay enabled");
+        chkAutoPay.addActionListener(e -> {
+            if (info != null) {
+                info.setAutoPay(chkAutoPay.isSelected());
+                touchAndNotify();
+            }
+        });
+        cmbVpsStatus = new JComboBox<>(new String[]{"active", "testing", "trial", "paused", "cancelled", "deleted", "unknown"});
+        cmbVpsStatus.addActionListener(e -> {
+            if (info != null) {
+                info.setVpsStatus((String) cmbVpsStatus.getSelectedItem());
+                touchAndNotify();
+            }
+        });
+        inpTags = new SkinnedTextField(10);
+        bindText(inpTags, value -> info.setTags(value));
+        inpDescription = new SkinnedTextArea();
+        inpDescription.setRows(4);
+        inpDescription.setLineWrap(true);
+        inpDescription.setWrapStyleWord(true);
+        bindText(inpDescription, value -> info.setDescription(value));
+        inpExternalRefs = new SkinnedTextArea();
+        inpExternalRefs.setRows(3);
+        inpExternalRefs.setLineWrap(true);
+        inpExternalRefs.setWrapStyleWord(true);
+        bindText(inpExternalRefs, value -> info.setExternalRefs(value));
+
+        chkSyncPrivateKey = new JCheckBox("Sync private key to Infisical");
+        chkSyncPrivateKey.addActionListener(e -> {
+            if (info != null) {
+                info.setSyncPrivateKey(chkSyncPrivateKey.isSelected());
+                touchAndNotify();
+            }
+        });
+        chkSyncPublicKey = new JCheckBox("Sync public key to Infisical");
+        chkSyncPublicKey.addActionListener(e -> {
+            if (info != null) {
+                info.setSyncPublicKey(chkSyncPublicKey.isSelected());
+                touchAndNotify();
+            }
+        });
+
+        int row = 0;
+        addLabel(panel, "Provider", row++, labelInset);
+        addField(panel, cmbProvider, row++, fieldInset);
+        addLabel(panel, "Account / order ID", row++, labelInset);
+        addField(panel, inpAccountId, row++, fieldInset);
+        addLabel(panel, "Billing mode", row++, labelInset);
+        addField(panel, cmbBillingPeriodType, row++, fieldInset);
+        addLabel(panel, "Billing cycle", row++, labelInset);
+        addField(panel, createRow(cmbBillingCycle, Box.createHorizontalStrut(scale(10)), new JLabel("Days"), Box.createHorizontalStrut(scale(5)), new JSpinner(billingCycleDaysModel)), row++, fieldInset);
+        addLabel(panel, "Price", row++, labelInset);
+        addField(panel, createRow(inpPrice, Box.createHorizontalStrut(scale(10)), new JLabel("Currency"), Box.createHorizontalStrut(scale(5)), inpCurrency), row++, fieldInset);
+        addLabel(panel, "Next payment date", row++, labelInset);
+        addField(panel, inpNextPaymentDate, row++, fieldInset);
+        addLabel(panel, "Hourly rate", row++, labelInset);
+        addField(panel, inpHourlyRate, row++, fieldInset);
+        addLabel(panel, "Next balance check date", row++, labelInset);
+        addField(panel, inpNextBalanceCheckDate, row++, fieldInset);
+        addLabel(panel, "Cancel by date", row++, labelInset);
+        addField(panel, inpCancelByDate, row++, fieldInset);
+        addField(panel, chkAutoPay, row++, fieldInset);
+        addLabel(panel, "Status", row++, labelInset);
+        addField(panel, cmbVpsStatus, row++, fieldInset);
+        addLabel(panel, "Tags", row++, labelInset);
+        addField(panel, inpTags, row++, fieldInset);
+        addLabel(panel, "Description / notes", row++, labelInset);
+        addField(panel, new JScrollPane(inpDescription), row++, fieldInset);
+        addLabel(panel, "External refs", row++, labelInset);
+        addField(panel, new JScrollPane(inpExternalRefs), row++, fieldInset);
+        addField(panel, chkSyncPrivateKey, row++, fieldInset);
+        addField(panel, chkSyncPublicKey, row++, fieldInset);
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 1;
+        c.weighty = 1;
+        c.fill = GridBagConstraints.BOTH;
+        panel.add(new JPanel(), c);
+        SkinnedScrollPane scrollPane = new SkinnedScrollPane(panel);
+        scrollPane.setBorder(null);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(scale(18));
+        scrollPane.getVerticalScrollBar().setBlockIncrement(scale(90));
+        return scrollPane;
+    }
+
+    private ProviderRecord getSelectedProvider() {
+        Object selected = cmbProvider == null ? null : cmbProvider.getSelectedItem();
+        if (selected instanceof ProviderRecord && !((ProviderRecord) selected).isBlank()) {
+            return (ProviderRecord) selected;
+        }
+        return null;
+    }
+
+    private void selectProvider(String providerId, String providerName) {
+        if (providerModel == null) {
+            return;
+        }
+        for (int i = 0; i < providerModel.getSize(); i++) {
+            ProviderRecord provider = providerModel.getElementAt(i);
+            if (providerId != null && providerId.equals(provider.getId())) {
+                cmbProvider.setSelectedIndex(i);
+                return;
+            }
+            if ((providerId == null || providerId.isBlank()) && providerName != null
+                    && providerName.equalsIgnoreCase(provider.getName())) {
+                cmbProvider.setSelectedIndex(i);
+                return;
+            }
+        }
+        cmbProvider.setSelectedIndex(0);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return null;
+    }
+
+    private void addLabel(JPanel panel, String text, int row, Insets insets) {
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 1;
+        c.insets = insets;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.anchor = GridBagConstraints.LINE_START;
+        panel.add(new JLabel(text), c);
+    }
+
+    private void addField(JPanel panel, Component component, int row, Insets insets) {
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 1;
+        c.insets = insets;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.anchor = GridBagConstraints.LINE_START;
+        panel.add(component, c);
+    }
+
+    private Component createRow(Component... components) {
+        Box box = Box.createHorizontalBox();
+        box.setAlignmentX(Component.LEFT_ALIGNMENT);
+        for (Component component : components) {
+            box.add(component);
+        }
+        box.add(Box.createHorizontalGlue());
+        return box;
+    }
+
+    private void bindText(JTextComponent component, Consumer<String> setter) {
+        component.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                update();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                update();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                update();
+            }
+
+            private void update() {
+                if (info == null) {
+                    return;
+                }
+                setter.accept(component.getText());
+                touchAndNotify();
+            }
+        });
+    }
+
+    private void touchAndNotify() {
+        notifyChange();
+    }
+
+    private void setVpsFields(SessionInfo info) {
+        reloadProviders();
+        selectProvider(info.getProviderId(), info.getProvider());
+        inpAccountId.setText(info.getAccountId());
+        cmbBillingPeriodType.setSelectedItem(info.getBillingPeriodType() == null ? "fixed_period" : info.getBillingPeriodType());
+        cmbBillingCycle.setSelectedItem(info.getBillingCycle() == null ? "monthly" : info.getBillingCycle());
+        int periodDays = info.getBillingPeriodDays() > 0 ? info.getBillingPeriodDays() : info.getBillingCycleDays();
+        billingCycleDaysModel.setValue(periodDays <= 0 ? 30 : periodDays);
+        inpPrice.setText(info.getPrice());
+        inpCurrency.setText(info.getCurrency() == null ? "USD" : info.getCurrency());
+        inpNextPaymentDate.setText(info.getNextPaymentDate());
+        inpHourlyRate.setText(info.getHourlyRate());
+        inpNextBalanceCheckDate.setText(info.getNextBalanceCheckDate());
+        inpCancelByDate.setText(info.getCancelByDate());
+        chkAutoPay.setSelected(info.isAutoPay());
+        cmbVpsStatus.setSelectedItem(info.getVpsStatus() == null ? "active" : info.getVpsStatus());
+        inpTags.setText(info.getTags());
+        inpDescription.setText(info.getDescription());
+        inpExternalRefs.setText(info.getExternalRefs());
+        chkSyncPrivateKey.setSelected(info.isSyncPrivateKey());
+        chkSyncPublicKey.setSelected(info.isSyncPublicKey());
     }
 
     private JPanel createJumpPanel() {

@@ -289,6 +289,11 @@ public class AppWindow extends JFrame {
         btnNew.addActionListener(e -> this.createFirstSessionPanel());
         btnNew.setToolTipText(String.format(TOOLTIP_FORMAT, App.getCONTEXT().getBundle().getString("new_connection"), "alt+n"));
 
+        JButton btnProviders = new JButton(FontAwesomeContants.FA_BRIEFCASE);
+        btnProviders.setFont(App.getCONTEXT().getSkin().getIconFont(SMALL_TEXT_SIZE));
+        btnProviders.addActionListener(e -> new ProvidersDialog(this).setVisible(true));
+        btnProviders.setToolTipText("Providers");
+
         btnToggle = new JButton(FontAwesomeContants.FA_ANGLE_DOUBLE_LEFT);
         btnToggle.setFont(App.getCONTEXT().getSkin().getIconFont(SMALL_TEXT_SIZE));
 
@@ -299,10 +304,13 @@ public class AppWindow extends JFrame {
 
         // Calculate the maximum width and height between the two buttons
         Dimension sizeNew = btnNew.getPreferredSize();
+        Dimension sizeProviders = btnProviders.getPreferredSize();
         Dimension sizeToggle = btnToggle.getPreferredSize();
 
         int maxWidth = Math.max(sizeNew.width, sizeToggle.width);
+        maxWidth = Math.max(maxWidth, sizeProviders.width);
         int maxHeight = Math.max(sizeNew.height, sizeToggle.height);
+        maxHeight = Math.max(maxHeight, sizeProviders.height);
 
         // Create a new Dimension with the maximum width and height
         Dimension maxSize = scale(new Dimension(maxWidth, maxHeight));
@@ -311,6 +319,10 @@ public class AppWindow extends JFrame {
         btnNew.setPreferredSize(maxSize);
         btnNew.setMinimumSize(maxSize);
         btnNew.setMaximumSize(maxSize);
+
+        btnProviders.setPreferredSize(maxSize);
+        btnProviders.setMinimumSize(maxSize);
+        btnProviders.setMaximumSize(maxSize);
 
         btnToggle.setPreferredSize(maxSize);
         btnToggle.setMinimumSize(maxSize);
@@ -328,6 +340,8 @@ public class AppWindow extends JFrame {
         topBox.add(btnToggle);
         topBox.add(Box.createRigidArea(scale(new Dimension(5, 0))));
         topBox.add(btnNew);
+        topBox.add(Box.createRigidArea(scale(new Dimension(5, 0))));
+        topBox.add(btnProviders);
         topBox.add(Box.createRigidArea(scale(new Dimension(5, 0))));
         topBox.add(btnLocalTerm);
         JPanel panel = new JPanel(new BorderLayout());

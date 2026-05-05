@@ -16,6 +16,8 @@ public class Constants {
     public static final String APPLICATION_VERSION = "3.17.13";
     public static final String APPLICATION_NAME = "Muon SSH";
     public static final String SESSION_DB_FILE = "session-store.json";
+    public static final String VPS_LEDGER_DB_FILE = "vps-ledger.db";
+    public static final String LEGACY_SESSION_BACKUP_FILE = "session-store.json.backup-before-sqlite";
     public static final String CONFIG_DB_FILE = "settings.json";
     public static final String SNIPPETS_FILE = "snippets.json";
     public static final String PINNED_LOGS = "pinned-logs.json";

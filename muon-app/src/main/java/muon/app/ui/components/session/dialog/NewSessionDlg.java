@@ -62,7 +62,8 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         setBackground(new Color(245, 245, 245));
         setLayout(new BorderLayout());
 
-        setSize(scale(800), scale(600));
+        setSize(scale(1100), scale(760));
+        setMinimumSize(scale(new Dimension(980, 680)));
         setModal(true);
 
         setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
@@ -154,6 +155,10 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         btnImport.addActionListener(this);
         btnImport.putClientProperty(BUTTON_NAME, "btnImport");
 
+        JButton btnVpsOverview = new JButton("VPS overview");
+        btnVpsOverview.addActionListener(this);
+        btnVpsOverview.putClientProperty(BUTTON_NAME, "btnVpsOverview");
+
         normalizeButtonSize();
 
         Box box1 = Box.createHorizontalBox();
@@ -166,11 +171,12 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         box1.add(Box.createHorizontalStrut(10));
         box1.add(btnCancel);
 
-        GridLayout gl = new GridLayout(3, 2, 5, 5);
+        GridLayout gl = new GridLayout(4, 2, 5, 5);
         JPanel btnPane = new JPanel(gl);
         btnPane.setBorder(getScaledEmptyBorder(10, 0, 0, 0));
         btnPane.add(btnNewHost);
         btnPane.add(btnNewFolder);
+        btnPane.add(btnVpsOverview);
         btnPane.add(btnDup);
         btnPane.add(btnDel);
         btnPane.add(btnExport);
@@ -196,9 +202,7 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
 
         JPanel pdet = new JPanel(new BorderLayout());
 
-        JScrollPane scrollPane = new JScrollPane(pp);
-        scrollPane.setBorder(null);
-        pdet.add(scrollPane);
+        pdet.add(pp);
         pdet.add(box1, BorderLayout.SOUTH);
 
 
@@ -241,6 +245,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
                     return;
                 }
                 selectedInfo.setName(txtName.getText());
+                if (selectedInfo instanceof SessionInfo) {
+                    ((SessionInfo) selectedInfo).setUpdatedAt(System.currentTimeMillis());
+                }
                 TreePath parentPath = tree.getSelectionPath();
                 DefaultMutableTreeNode parentNode;
 
@@ -432,9 +439,17 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             case "btnExport":
                 SessionExportImport.exportSessions();
                 break;
+            case "btnVpsOverview":
+                showVpsOverview();
+                break;
             default:
                 break;
         }
+    }
+
+    private void showVpsOverview() {
+        SessionFolder folder = SessionStore.convertModelFromTree(rootNode);
+        new VpsOverviewDialog(this, folder).setVisible(true);
     }
 
     private void importSessions(DefaultMutableTreeNode parentNode) {

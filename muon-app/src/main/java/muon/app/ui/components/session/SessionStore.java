@@ -9,6 +9,8 @@ import muon.app.App;
 import muon.app.common.PasswordStore;
 import muon.app.ui.components.session.dialog.TreeManager;
 import muon.app.util.Constants;
+import muon.app.vps.VpsHostRepository;
+import muon.app.vps.VpsLedgerServices;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -24,14 +26,25 @@ import java.util.List;
 
 @Slf4j
 public class SessionStore {
+    private static final VpsHostRepository VPS_HOST_REPOSITORY = new VpsHostRepository();
 
     protected SessionStore() {
 
     }
 
     public static synchronized SavedSessionTree load() {
-        File file = Paths.get(App.getCONTEXT().getConfigDir().getAbsolutePath(), Constants.SESSION_DB_FILE).toFile();
-        return load(file);
+        SavedSessionTree savedSessionTree = VPS_HOST_REPOSITORY.loadTree();
+        try {
+            log.debug("Loading passwords...");
+            PasswordStore.getSharedInstance().populatePassword(savedSessionTree);
+            log.debug("Loading passwords... done");
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            JOptionPane.showMessageDialog(App.getAppWindow(),
+                                          String.format(App.getCONTEXT().getBundle().getString("error_occurred"), e.getMessage()), App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
+            return null;
+        }
+        return savedSessionTree;
     }
 
     public static synchronized SavedSessionTree load(File file) {
@@ -65,11 +78,28 @@ public class SessionStore {
     }
 
     public static synchronized void save(SessionFolder folder, String lastSelectionPath) {
-        File file = new File(App.getCONTEXT().getConfigDir(), Constants.SESSION_DB_FILE);
-        save(folder, lastSelectionPath, file);
+        try {
+            SavedSessionTree tree = new SavedSessionTree();
+            tree.setFolder(folder);
+            tree.setLastSelection(lastSelectionPath);
+            VPS_HOST_REPOSITORY.saveTree(folder, lastSelectionPath);
+            try {
+                PasswordStore.getSharedInstance().savePasswords(tree);
+            } catch (Exception e) {
+                log.error(e.getMessage(), e);
+            }
+            VpsLedgerServices.syncVikunjaPaymentsAsync(folder, lastSelectionPath);
+        } catch (IOException e) {
+            log.error(e.getMessage(), e);
+        }
     }
 
     public static synchronized void save(SessionFolder folder, String lastSelectionPath, File file) {
+        File defaultSessionFile = new File(App.getCONTEXT().getConfigDir(), Constants.SESSION_DB_FILE);
+        if (file != null && file.getAbsoluteFile().equals(defaultSessionFile.getAbsoluteFile())) {
+            save(folder, lastSelectionPath);
+            return;
+        }
         ObjectMapper objectMapper = new ObjectMapper();
         try {
             SavedSessionTree tree = new SavedSessionTree();

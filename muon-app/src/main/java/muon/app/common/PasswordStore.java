@@ -99,6 +99,26 @@ public final class PasswordStore {
         this.passwordMap.put(alias, password);
     }
 
+    public synchronized String getSecret(String alias) {
+        if (!unlockStore()) {
+            return null;
+        }
+        char[] secret = getSavedPassword(alias);
+        return secret == null ? null : new String(secret);
+    }
+
+    public synchronized void saveSecret(String alias, String value) throws Exception {
+        if (!unlockStore()) {
+            throw new IllegalStateException("Unable to unlock password store");
+        }
+        if (value == null || value.isEmpty()) {
+            this.passwordMap.remove(alias);
+        } else {
+            savePassword(alias, value.toCharArray());
+        }
+        saveKeyStore();
+    }
+
     public synchronized void saveKeyStore() throws Exception {
 
         SecretKeyFactory secretKeyFactory = SecretKeyFactory.getInstance("PBE");

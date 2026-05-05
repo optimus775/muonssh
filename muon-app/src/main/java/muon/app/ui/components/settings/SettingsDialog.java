@@ -13,6 +13,9 @@ import muon.app.util.LayoutUtilities;
 import muon.app.util.OptionPaneUtils;
 import muon.app.util.enums.ConflictAction;
 import muon.app.util.enums.Language;
+import muon.app.vps.InfisicalClient;
+import muon.app.vps.VikunjaClient;
+import muon.app.vps.VpsLedgerServices;
 
 import javax.swing.*;
 import javax.swing.border.CompoundBorder;
@@ -91,6 +94,18 @@ public class SettingsDialog extends JDialog {
     private JButton btnChangeMasterPassword;
 
     private JCheckBox chkK8sPlugin;
+    private JTextField txtVikunjaBaseUrl;
+    private JSpinner spVikunjaProjectId;
+    private JSpinner spVikunjaReminderDays;
+    private JPasswordField txtVikunjaToken;
+    private JTextField txtInfisicalBaseUrl;
+    private JTextField txtInfisicalProjectId;
+    private JTextField txtInfisicalEnvironment;
+    private JTextField txtInfisicalSecretBasePath;
+    private JTextField txtInfisicalClientId;
+    private JTextField txtInfisicalOrganizationSlug;
+    private JPasswordField txtInfisicalClientSecret;
+    private JCheckBox chkInfisicalSyncPrivateKeys;
 
     private Color[] getIndexColors() {
         return new Color[]{
@@ -146,6 +161,7 @@ public class SettingsDialog extends JDialog {
         panelMap.put(App.getCONTEXT().getBundle().getString("editor"), createEditorPanel());
         panelMap.put(App.getCONTEXT().getBundle().getString("display"), createMiscPanel());
         panelMap.put(App.getCONTEXT().getBundle().getString("security"), createSecurityPanel());
+        panelMap.put("VPS Ledger", createVpsLedgerPanel());
         panelMap.put(App.getCONTEXT().getBundle().getString("plugins"), createPluginsPanel());
 
         for (Map.Entry<String, Component> panel : panelMap.entrySet()) {
@@ -617,9 +633,33 @@ public class SettingsDialog extends JDialog {
 
         settings.setEnabledK8sContextPlugin(chkK8sPlugin.isSelected());
 
+        settings.setVikunjaBaseUrl(txtVikunjaBaseUrl.getText().trim());
+        settings.setVikunjaProjectId((Long) spVikunjaProjectId.getValue());
+        settings.setVikunjaReminderOffsetDays((Integer) spVikunjaReminderDays.getValue());
+
+        settings.setInfisicalBaseUrl(txtInfisicalBaseUrl.getText().trim());
+        settings.setInfisicalProjectId(txtInfisicalProjectId.getText().trim());
+        settings.setInfisicalEnvironment(txtInfisicalEnvironment.getText().trim());
+        settings.setInfisicalSecretBasePath(txtInfisicalSecretBasePath.getText().trim());
+        settings.setInfisicalClientId(txtInfisicalClientId.getText().trim());
+        settings.setInfisicalOrganizationSlug(txtInfisicalOrganizationSlug.getText().trim());
+        settings.setInfisicalSyncPrivateKeys(chkInfisicalSyncPrivateKeys.isSelected());
+
+        saveIntegrationSecrets();
 
         App.getCONTEXT().getSettingsManager().saveSettings();
         super.setVisible(false);
+    }
+
+    private void saveIntegrationSecrets() {
+        try {
+            PasswordStore store = PasswordStore.getSharedInstance();
+            store.saveSecret(VikunjaClient.API_TOKEN_ALIAS, new String(txtVikunjaToken.getPassword()).trim());
+            store.saveSecret(InfisicalClient.CLIENT_SECRET_ALIAS, new String(txtInfisicalClientSecret.getPassword()).trim());
+        } catch (Exception e) {
+            log.error("Unable to save VPS Ledger integration secrets", e);
+            JOptionPane.showMessageDialog(this, App.getCONTEXT().getBundle().getString("error_operation"), App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     public boolean showDialog(JFrame window, SettingsPageName page) {
@@ -721,9 +761,35 @@ public class SettingsDialog extends JDialog {
 
         this.chkUseMasterPassword.setSelected(settings.isUsingMasterPassword());
         this.btnChangeMasterPassword.setEnabled(settings.isUsingMasterPassword());
+        this.txtVikunjaBaseUrl.setText(settings.getVikunjaBaseUrl());
+        this.spVikunjaProjectId.setValue(settings.getVikunjaProjectId());
+        this.spVikunjaReminderDays.setValue(settings.getVikunjaReminderOffsetDays());
+
+        this.txtInfisicalBaseUrl.setText(settings.getInfisicalBaseUrl());
+        this.txtInfisicalProjectId.setText(settings.getInfisicalProjectId());
+        this.txtInfisicalEnvironment.setText(settings.getInfisicalEnvironment());
+        this.txtInfisicalSecretBasePath.setText(settings.getInfisicalSecretBasePath());
+        this.txtInfisicalClientId.setText(settings.getInfisicalClientId());
+        this.txtInfisicalOrganizationSlug.setText(settings.getInfisicalOrganizationSlug());
+        this.chkInfisicalSyncPrivateKeys.setSelected(settings.isInfisicalSyncPrivateKeys());
+        loadIntegrationSecrets();
 
         checkRbScreenSelection();
 
+    }
+
+    private void loadIntegrationSecrets() {
+        try {
+            PasswordStore store = PasswordStore.getSharedInstance();
+            String vikunjaToken = store.getSecret(VikunjaClient.API_TOKEN_ALIAS);
+            txtVikunjaToken.setText(vikunjaToken == null ? "" : vikunjaToken);
+            String infisicalClientSecret = store.getSecret(InfisicalClient.CLIENT_SECRET_ALIAS);
+            txtInfisicalClientSecret.setText(infisicalClientSecret == null ? "" : infisicalClientSecret);
+        } catch (Exception e) {
+            log.error("Unable to load VPS Ledger integration secrets", e);
+            txtVikunjaToken.setText("");
+            txtInfisicalClientSecret.setText("");
+        }
     }
 
     private JPanel createEditorPanel() {
@@ -858,6 +924,78 @@ public class SettingsDialog extends JDialog {
         panel.add(vbox);
 
         return panel;
+    }
+
+    private Component createVpsLedgerPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        Box vbox = Box.createVerticalBox();
+        vbox.setBorder(getScaledEmptyBorder(30, 10, 10, 10));
+
+        txtVikunjaBaseUrl = new SkinnedTextField(30);
+        spVikunjaProjectId = new JSpinner(new SpinnerNumberModel(0L, 0L, Long.MAX_VALUE, 1L));
+        spVikunjaReminderDays = new JSpinner(new SpinnerNumberModel(3, 0, 365, 1));
+        txtVikunjaToken = new JPasswordField(30);
+
+        txtInfisicalBaseUrl = new SkinnedTextField(30);
+        txtInfisicalProjectId = new SkinnedTextField(30);
+        txtInfisicalEnvironment = new SkinnedTextField(12);
+        txtInfisicalSecretBasePath = new SkinnedTextField(30);
+        txtInfisicalClientId = new SkinnedTextField(30);
+        txtInfisicalOrganizationSlug = new SkinnedTextField(20);
+        txtInfisicalClientSecret = new JPasswordField(30);
+        chkInfisicalSyncPrivateKeys = new JCheckBox("Allow SSH key sync to Infisical");
+
+        JButton btnSyncInfisical = new JButton("Sync Infisical now");
+        btnSyncInfisical.addActionListener(e -> VpsLedgerServices.syncInfisicalNow(this));
+
+        vbox.add(createTitleLabel("Vikunja"));
+        vbox.add(Box.createVerticalStrut(10));
+        vbox.add(createSettingsRow("Base URL", txtVikunjaBaseUrl));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Project ID", spVikunjaProjectId));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Reminder offset days", spVikunjaReminderDays));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("API token", txtVikunjaToken));
+        vbox.add(Box.createVerticalStrut(30));
+
+        vbox.add(createTitleLabel("Infisical"));
+        vbox.add(Box.createVerticalStrut(10));
+        vbox.add(createSettingsRow("Base URL", txtInfisicalBaseUrl));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Project ID", txtInfisicalProjectId));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Environment", txtInfisicalEnvironment));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Secret base path", txtInfisicalSecretBasePath));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Client ID", txtInfisicalClientId));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Client secret", txtInfisicalClientSecret));
+        vbox.add(Box.createVerticalStrut(8));
+        vbox.add(createSettingsRow("Organization slug", txtInfisicalOrganizationSlug));
+        vbox.add(Box.createVerticalStrut(8));
+        chkInfisicalSyncPrivateKeys.setAlignmentX(Box.LEFT_ALIGNMENT);
+        vbox.add(chkInfisicalSyncPrivateKeys);
+        vbox.add(Box.createVerticalStrut(12));
+        btnSyncInfisical.setAlignmentX(Box.LEFT_ALIGNMENT);
+        vbox.add(btnSyncInfisical);
+        vbox.add(Box.createVerticalGlue());
+
+        panel.add(new SkinnedScrollPane(vbox));
+        return panel;
+    }
+
+    private Component createSettingsRow(String label, Component field) {
+        JLabel lbl = new JLabel(label);
+        lbl.setPreferredSize(scale(new Dimension(180, lbl.getPreferredSize().height)));
+        Box row = Box.createHorizontalBox();
+        row.setAlignmentX(Box.LEFT_ALIGNMENT);
+        row.add(lbl);
+        row.add(Box.createHorizontalStrut(scale(10)));
+        row.add(field);
+        row.add(Box.createHorizontalGlue());
+        return row;
     }
 
     private void actionBtnListenerForChangeMasterPassword() {

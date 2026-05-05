@@ -116,6 +116,18 @@ public class Settings {
 
     private String defaultPanel = "FILES";
 
+    private String vikunjaBaseUrl = "";
+    private long vikunjaProjectId = 0;
+    private int vikunjaReminderOffsetDays = 3;
+
+    private String infisicalBaseUrl = "https://app.infisical.com";
+    private String infisicalProjectId = "";
+    private String infisicalEnvironment = "prod";
+    private String infisicalSecretBasePath = "/vps-manager";
+    private String infisicalClientId = "";
+    private String infisicalOrganizationSlug = "";
+    private boolean infisicalSyncPrivateKeys = false;
+
     @JsonSetter("fileTransferMode")
     public void setOldFileTransferMode(String s) {
         fileTransferMode = TransferMode.BACKGROUND;

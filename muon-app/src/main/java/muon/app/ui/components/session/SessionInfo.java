@@ -35,6 +35,29 @@ public class SessionInfo extends NamedItem implements Serializable {
     private List<PortForwardingRule> portForwardingRules = new ArrayList<>();
     private boolean useX11Forwarding = false;
     private boolean sftpOnly = false;
+    private String providerId;
+    private String provider;
+    private String providerUrl;
+    private String accountId;
+    private String billingPeriodType = "fixed_period";
+    private String billingCycle = "monthly";
+    private int billingCycleDays = 30;
+    private int billingPeriodDays = 30;
+    private String price;
+    private String currency = "USD";
+    private String nextPaymentDate;
+    private String hourlyRate;
+    private String nextBalanceCheckDate;
+    private String cancelByDate;
+    private boolean autoPay = false;
+    private String vpsStatus = "active";
+    private String tags;
+    private String description;
+    private String externalRefs;
+    private Long vikunjaTaskId;
+    private boolean syncPrivateKey = false;
+    private boolean syncPublicKey = false;
+    private long updatedAt = System.currentTimeMillis();
 
     private String password;
 
@@ -68,6 +91,30 @@ public class SessionInfo extends NamedItem implements Serializable {
         info.setUser(user);
         info.setName(name);
         info.setUseX11Forwarding(useX11Forwarding);
+        info.setSftpOnly(sftpOnly);
+        info.setProviderId(providerId);
+        info.setProvider(provider);
+        info.setProviderUrl(providerUrl);
+        info.setAccountId(accountId);
+        info.setBillingPeriodType(billingPeriodType);
+        info.setBillingCycle(billingCycle);
+        info.setBillingCycleDays(billingCycleDays);
+        info.setBillingPeriodDays(billingPeriodDays);
+        info.setPrice(price);
+        info.setCurrency(currency);
+        info.setNextPaymentDate(nextPaymentDate);
+        info.setHourlyRate(hourlyRate);
+        info.setNextBalanceCheckDate(nextBalanceCheckDate);
+        info.setCancelByDate(cancelByDate);
+        info.setAutoPay(autoPay);
+        info.setVpsStatus(vpsStatus);
+        info.setTags(tags);
+        info.setDescription(description);
+        info.setExternalRefs(externalRefs);
+        info.setVikunjaTaskId(vikunjaTaskId);
+        info.setSyncPrivateKey(syncPrivateKey);
+        info.setSyncPublicKey(syncPublicKey);
+        info.setUpdatedAt(System.currentTimeMillis());
         return info;
     }
 
@@ -86,7 +133,9 @@ public class SessionInfo extends NamedItem implements Serializable {
     @Override
     public int hashCode() {
         return Objects.hash(host, user, localFolder, remoteFolder, port, favouriteRemoteFolders, favouriteLocalFolders, privateKeyFile, proxyPort, proxyHost, proxyUser, proxyPassword, proxyType, useJumpHosts, jumpType
-                , jumpHosts, portForwardingRules, password, useX11Forwarding);
+                , jumpHosts, portForwardingRules, password, useX11Forwarding, sftpOnly, providerId, provider, providerUrl, accountId, billingPeriodType, billingCycle, billingCycleDays, billingPeriodDays, price, currency,
+                nextPaymentDate, hourlyRate, nextBalanceCheckDate, cancelByDate, autoPay,
+                vpsStatus, tags, description, externalRefs, vikunjaTaskId, syncPrivateKey, syncPublicKey, updatedAt);
     }
 
 
