@@ -58,9 +58,15 @@ public class SessionInfoPanel extends JPanel {
     private DefaultComboBoxModel<ProviderRecord> providerModel;
     private JComboBox<ProviderRecord> cmbProvider;
     private JTextField inpAccountId;
-    private JComboBox<String> cmbBillingPeriodType;
+    private JRadioButton radBillingPeriod;
+    private JRadioButton radBillingDays;
+    private JRadioButton radBillingHourly;
     private JComboBox<String> cmbBillingCycle;
     private SpinnerNumberModel billingCycleDaysModel;
+    private JPanel billingPeriodPanel;
+    private JPanel billingDaysPanel;
+    private JPanel billingHourlyPanel;
+    private JPanel fixedPaymentPanel;
     private JTextField inpPrice;
     private JTextField inpCurrency;
     private JTextField inpNextPaymentDate;
@@ -123,6 +129,7 @@ public class SessionInfoPanel extends JPanel {
         if (info != null) {
             applySftpOnlyState(info.isSftpOnly(), false);
         }
+        updateBillingModeState();
         applyReadOnlyColors(editable);
     }
 
@@ -263,15 +270,16 @@ public class SessionInfoPanel extends JPanel {
             showError("User name can not be left blank");
             return false;
         }
-        if (!isValidOptionalDate(inpNextPaymentDate.getText())) {
+        boolean hourlyBilling = "hourly".equals(selectedBillingMode());
+        if (!hourlyBilling && !isValidOptionalDate(inpNextPaymentDate.getText())) {
             showError("Next payment date must be empty or use YYYY-MM-DD");
             return false;
         }
-        if (!isValidOptionalDate(inpCancelByDate.getText())) {
+        if (!hourlyBilling && !isValidOptionalDate(inpCancelByDate.getText())) {
             showError("Cancel-by date must be empty or use YYYY-MM-DD");
             return false;
         }
-        if (!isValidOptionalDate(inpNextBalanceCheckDate.getText())) {
+        if (hourlyBilling && !isValidOptionalDate(inpNextBalanceCheckDate.getText())) {
             showError("Next balance check date must be empty or use YYYY-MM-DD");
             return false;
         }
@@ -436,23 +444,30 @@ public class SessionInfoPanel extends JPanel {
         inpAccountId = new SkinnedTextField(10);
         bindText(inpAccountId, value -> info.setAccountId(value));
 
-        cmbBillingPeriodType = new JComboBox<>(new String[]{"fixed_period", "hourly_balance"});
-        cmbBillingPeriodType.addActionListener(e -> {
-            if (info != null) {
-                info.setBillingPeriodType((String) cmbBillingPeriodType.getSelectedItem());
-                touchAndNotify();
-            }
-        });
-        cmbBillingCycle = new JComboBox<>(new String[]{"monthly", "yearly", "custom"});
+        radBillingPeriod = new JRadioButton("Fixed period");
+        radBillingDays = new JRadioButton("Fixed number of days");
+        radBillingHourly = new JRadioButton("Hourly balance");
+        ButtonGroup billingModeGroup = new ButtonGroup();
+        billingModeGroup.add(radBillingPeriod);
+        billingModeGroup.add(radBillingDays);
+        billingModeGroup.add(radBillingHourly);
+        radBillingPeriod.addActionListener(e -> selectBillingMode("period"));
+        radBillingDays.addActionListener(e -> selectBillingMode("days"));
+        radBillingHourly.addActionListener(e -> selectBillingMode("hourly"));
+
+        cmbBillingCycle = new JComboBox<>(new String[]{"monthly", "yearly"});
         cmbBillingCycle.addActionListener(e -> {
-            if (info != null) {
+            if (info != null && radBillingPeriod.isSelected()) {
                 info.setBillingCycle((String) cmbBillingCycle.getSelectedItem());
+                applyPeriodDaysFromCycle();
                 touchAndNotify();
             }
         });
         billingCycleDaysModel = new SpinnerNumberModel(30, 1, 3650, 1);
         billingCycleDaysModel.addChangeListener(e -> {
-            if (info != null) {
+            if (info != null && radBillingDays.isSelected()) {
+                info.setBillingPeriodType("fixed_period");
+                info.setBillingCycle("custom");
                 info.setBillingCycleDays((Integer) billingCycleDaysModel.getValue());
                 info.setBillingPeriodDays((Integer) billingCycleDaysModel.getValue());
                 touchAndNotify();
@@ -522,21 +537,7 @@ public class SessionInfoPanel extends JPanel {
         addField(panel, cmbProvider, row++, fieldInset);
         addLabel(panel, "Account / order ID", row++, labelInset);
         addField(panel, inpAccountId, row++, fieldInset);
-        addLabel(panel, "Billing mode", row++, labelInset);
-        addField(panel, cmbBillingPeriodType, row++, fieldInset);
-        addLabel(panel, "Billing cycle", row++, labelInset);
-        addField(panel, createRow(cmbBillingCycle, Box.createHorizontalStrut(scale(10)), new JLabel("Days"), Box.createHorizontalStrut(scale(5)), new JSpinner(billingCycleDaysModel)), row++, fieldInset);
-        addLabel(panel, "Price", row++, labelInset);
-        addField(panel, createRow(inpPrice, Box.createHorizontalStrut(scale(10)), new JLabel("Currency"), Box.createHorizontalStrut(scale(5)), inpCurrency), row++, fieldInset);
-        addLabel(panel, "Next payment date", row++, labelInset);
-        addField(panel, inpNextPaymentDate, row++, fieldInset);
-        addLabel(panel, "Hourly rate", row++, labelInset);
-        addField(panel, inpHourlyRate, row++, fieldInset);
-        addLabel(panel, "Next balance check date", row++, labelInset);
-        addField(panel, inpNextBalanceCheckDate, row++, fieldInset);
-        addLabel(panel, "Cancel by date", row++, labelInset);
-        addField(panel, inpCancelByDate, row++, fieldInset);
-        addField(panel, chkAutoPay, row++, fieldInset);
+        addField(panel, createBillingSection(), row++, labelInset);
         addLabel(panel, "Status", row++, labelInset);
         addField(panel, cmbVpsStatus, row++, fieldInset);
         addLabel(panel, "Tags", row++, labelInset);
@@ -560,6 +561,81 @@ public class SessionInfoPanel extends JPanel {
         scrollPane.getVerticalScrollBar().setUnitIncrement(scale(18));
         scrollPane.getVerticalScrollBar().setBlockIncrement(scale(90));
         return scrollPane;
+    }
+
+    private Component createBillingSection() {
+        JPanel section = new JPanel(new GridBagLayout());
+        section.setBorder(BorderFactory.createTitledBorder("Billing cycle"));
+
+        JPanel modePanel = new JPanel(new GridLayout(0, 1, 0, scale(4)));
+        modePanel.add(radBillingPeriod);
+        modePanel.add(radBillingDays);
+        modePanel.add(radBillingHourly);
+
+        billingPeriodPanel = createBillingGroupPanel("Period");
+        addCompactRow(billingPeriodPanel, 0, "Period", cmbBillingCycle);
+
+        billingDaysPanel = createBillingGroupPanel("Number of days");
+        addCompactRow(billingDaysPanel, 0, "Days", new JSpinner(billingCycleDaysModel));
+
+        billingHourlyPanel = createBillingGroupPanel("Hourly");
+        addCompactRow(billingHourlyPanel, 0, "Hourly rate", inpHourlyRate);
+        addCompactRow(billingHourlyPanel, 1, "Next balance check", inpNextBalanceCheckDate);
+
+        fixedPaymentPanel = createBillingGroupPanel("Fixed payment");
+        addCompactRow(fixedPaymentPanel, 0, "Price", inpPrice);
+        addCompactRow(fixedPaymentPanel, 1, "Next payment date", inpNextPaymentDate);
+        addCompactRow(fixedPaymentPanel, 2, "Cancel by date", inpCancelByDate);
+        addCompactRow(fixedPaymentPanel, 3, "", chkAutoPay);
+
+        JPanel currencyPanel = new JPanel(new GridBagLayout());
+        addCompactRow(currencyPanel, 0, "Currency", inpCurrency);
+
+        int row = 0;
+        addSectionRow(section, modePanel, row++, scaleInsets(8, 8, 0, 8));
+        addSectionRow(section, billingPeriodPanel, row++, scaleInsets(8, 8, 0, 8));
+        addSectionRow(section, billingDaysPanel, row++, scaleInsets(8, 8, 0, 8));
+        addSectionRow(section, billingHourlyPanel, row++, scaleInsets(8, 8, 0, 8));
+        addSectionRow(section, currencyPanel, row++, scaleInsets(8, 8, 0, 8));
+        addSectionRow(section, fixedPaymentPanel, row, scaleInsets(8, 8, 8, 8));
+        return section;
+    }
+
+    private JPanel createBillingGroupPanel(String title) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder(title));
+        return panel;
+    }
+
+    private void addCompactRow(JPanel panel, int row, String label, Component component) {
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.gridy = row;
+        labelConstraints.insets = scaleInsets(3, 8, 3, 8);
+        labelConstraints.anchor = GridBagConstraints.LINE_START;
+        if (!label.isEmpty()) {
+            panel.add(new JLabel(label), labelConstraints);
+        }
+
+        GridBagConstraints fieldConstraints = new GridBagConstraints();
+        fieldConstraints.gridx = 1;
+        fieldConstraints.gridy = row;
+        fieldConstraints.weightx = 1;
+        fieldConstraints.insets = scaleInsets(3, label.isEmpty() ? 8 : 0, 3, 8);
+        fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
+        fieldConstraints.anchor = GridBagConstraints.LINE_START;
+        panel.add(component, fieldConstraints);
+    }
+
+    private void addSectionRow(JPanel panel, Component component, int row, Insets insets) {
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 1;
+        c.insets = insets;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.anchor = GridBagConstraints.LINE_START;
+        panel.add(component, c);
     }
 
     private ProviderRecord getSelectedProvider() {
@@ -621,16 +697,6 @@ public class SessionInfoPanel extends JPanel {
         panel.add(component, c);
     }
 
-    private Component createRow(Component... components) {
-        Box box = Box.createHorizontalBox();
-        box.setAlignmentX(Component.LEFT_ALIGNMENT);
-        for (Component component : components) {
-            box.add(component);
-        }
-        box.add(Box.createHorizontalGlue());
-        return box;
-    }
-
     private void bindText(JTextComponent component, Consumer<String> setter) {
         component.getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -662,12 +728,132 @@ public class SessionInfoPanel extends JPanel {
         notifyChange();
     }
 
+    private void selectBillingMode(String mode) {
+        if (info == null) {
+            updateBillingModeState();
+            return;
+        }
+        applyBillingModeToInfo(mode);
+        updateBillingModeState();
+        touchAndNotify();
+        applyReadOnlyColors(editable);
+    }
+
+    private void applyBillingModeToInfo(String mode) {
+        if ("hourly".equals(mode)) {
+            info.setBillingPeriodType("hourly_balance");
+            info.setBillingCycle("hourly");
+            return;
+        }
+
+        info.setBillingPeriodType("fixed_period");
+        if ("days".equals(mode)) {
+            info.setBillingCycle("custom");
+            int days = (Integer) billingCycleDaysModel.getValue();
+            info.setBillingCycleDays(days);
+            info.setBillingPeriodDays(days);
+            return;
+        }
+
+        String cycle = (String) cmbBillingCycle.getSelectedItem();
+        if (cycle == null || cycle.isBlank()) {
+            cycle = "monthly";
+            cmbBillingCycle.setSelectedItem(cycle);
+        }
+        info.setBillingCycle(cycle);
+        applyPeriodDaysFromCycle();
+    }
+
+    private void applyPeriodDaysFromCycle() {
+        if (info == null) {
+            return;
+        }
+        String cycle = (String) cmbBillingCycle.getSelectedItem();
+        int days = "yearly".equals(cycle) ? 365 : 30;
+        info.setBillingCycleDays(days);
+        info.setBillingPeriodDays(days);
+    }
+
+    private String resolveBillingMode(SessionInfo info) {
+        if (info == null) {
+            return "period";
+        }
+        if ("hourly_balance".equals(info.getBillingPeriodType())) {
+            return "hourly";
+        }
+        if ("custom".equals(info.getBillingCycle())) {
+            return "days";
+        }
+        return "period";
+    }
+
+    private String selectedBillingMode() {
+        if (radBillingHourly != null && radBillingHourly.isSelected()) {
+            return "hourly";
+        }
+        if (radBillingDays != null && radBillingDays.isSelected()) {
+            return "days";
+        }
+        return "period";
+    }
+
+    private void updateBillingModeState() {
+        if (radBillingPeriod == null) {
+            return;
+        }
+        boolean canEdit = editable;
+        boolean period = radBillingPeriod.isSelected();
+        boolean days = radBillingDays.isSelected();
+        boolean hourly = radBillingHourly.isSelected();
+
+        radBillingPeriod.setEnabled(canEdit);
+        radBillingDays.setEnabled(canEdit);
+        radBillingHourly.setEnabled(canEdit);
+        setBillingControlsEnabled(billingPeriodPanel, canEdit && period);
+        setBillingControlsEnabled(billingDaysPanel, canEdit && days);
+        setBillingControlsEnabled(billingHourlyPanel, canEdit && hourly);
+        setBillingControlsEnabled(fixedPaymentPanel, canEdit && !hourly);
+        inpCurrency.setEnabled(canEdit);
+        inpCurrency.setEditable(canEdit);
+        inpCurrency.setFocusable(canEdit);
+    }
+
+    private void setBillingControlsEnabled(Component component, boolean enabled) {
+        if (component == null) {
+            return;
+        }
+        component.setEnabled(enabled);
+        if (component instanceof JTextComponent) {
+            JTextComponent textComponent = (JTextComponent) component;
+            textComponent.setEditable(enabled);
+            textComponent.setFocusable(enabled);
+        }
+        if (component instanceof JSpinner) {
+            JSpinner spinner = (JSpinner) component;
+            JComponent editor = spinner.getEditor();
+            if (editor instanceof JSpinner.DefaultEditor) {
+                JTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+                textField.setEnabled(enabled);
+                textField.setEditable(enabled);
+            }
+        }
+        if (component instanceof Container) {
+            for (Component child : ((Container) component).getComponents()) {
+                setBillingControlsEnabled(child, enabled);
+            }
+        }
+    }
+
     private void setVpsFields(SessionInfo info) {
         reloadProviders();
         selectProvider(info.getProviderId(), info.getProvider());
         inpAccountId.setText(info.getAccountId());
-        cmbBillingPeriodType.setSelectedItem(info.getBillingPeriodType() == null ? "fixed_period" : info.getBillingPeriodType());
-        cmbBillingCycle.setSelectedItem(info.getBillingCycle() == null ? "monthly" : info.getBillingCycle());
+        String billingMode = resolveBillingMode(info);
+        radBillingPeriod.setSelected("period".equals(billingMode));
+        radBillingDays.setSelected("days".equals(billingMode));
+        radBillingHourly.setSelected("hourly".equals(billingMode));
+        String cycle = "yearly".equals(info.getBillingCycle()) ? "yearly" : "monthly";
+        cmbBillingCycle.setSelectedItem(cycle);
         int periodDays = info.getBillingPeriodDays() > 0 ? info.getBillingPeriodDays() : info.getBillingCycleDays();
         billingCycleDaysModel.setValue(periodDays <= 0 ? 30 : periodDays);
         inpPrice.setText(info.getPrice());
@@ -683,6 +869,8 @@ public class SessionInfoPanel extends JPanel {
         inpExternalRefs.setText(info.getExternalRefs());
         chkSyncPrivateKey.setSelected(info.isSyncPrivateKey());
         chkSyncPublicKey.setSelected(info.isSyncPublicKey());
+        applyBillingModeToInfo(billingMode);
+        updateBillingModeState();
     }
 
     private JPanel createJumpPanel() {

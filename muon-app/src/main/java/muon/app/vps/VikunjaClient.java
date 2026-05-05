@@ -101,15 +101,18 @@ public class VikunjaClient {
         appendLine(sb, "Provider URL", info.getProviderUrl());
         appendLine(sb, "Account/order", info.getAccountId());
         appendLine(sb, "Billing mode", info.getBillingPeriodType());
-        appendLine(sb, "Billing cycle", info.getBillingCycle());
-        if (info.getBillingPeriodDays() > 0) {
-            appendLine(sb, "Billing period days", Integer.toString(info.getBillingPeriodDays()));
+        if ("hourly_balance".equals(info.getBillingPeriodType())) {
+            appendLine(sb, "Hourly rate", formatHourlyRate(info));
+            appendLine(sb, "Next balance check", info.getNextBalanceCheckDate());
+        } else {
+            appendLine(sb, "Billing cycle", info.getBillingCycle());
+            if (info.getBillingPeriodDays() > 0) {
+                appendLine(sb, "Billing period days", Integer.toString(info.getBillingPeriodDays()));
+            }
+            appendLine(sb, "Price", formatPrice(info));
+            appendLine(sb, "Cancel by", info.getCancelByDate());
+            appendLine(sb, "Auto-pay", info.isAutoPay() ? "yes" : "no");
         }
-        appendLine(sb, "Price", formatPrice(info));
-        appendLine(sb, "Hourly rate", formatHourlyRate(info));
-        appendLine(sb, "Next balance check", info.getNextBalanceCheckDate());
-        appendLine(sb, "Cancel by", info.getCancelByDate());
-        appendLine(sb, "Auto-pay", info.isAutoPay() ? "yes" : "no");
         appendLine(sb, "Status", info.getVpsStatus());
         appendLine(sb, "Tags", info.getTags());
         appendLine(sb, "External refs", info.getExternalRefs());
