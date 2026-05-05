@@ -72,7 +72,7 @@ public class VikunjaClient {
 
     ObjectNode buildPaymentTaskPayload(SessionInfo info, Settings settings) {
         boolean hourlyBalance = "hourly_balance".equals(info.getBillingPeriodType());
-        LocalDate dueDate = LocalDate.parse(hourlyBalance ? info.getNextBalanceCheckDate() : info.getNextPaymentDate());
+        LocalDate dueDate = VpsDateFormat.parse(hourlyBalance ? info.getNextBalanceCheckDate() : info.getNextPaymentDate());
         ZonedDateTime dueAt = ZonedDateTime.of(dueDate, LocalTime.of(9, 0), ZoneId.systemDefault());
 
         ObjectNode payload = objectMapper.createObjectNode();
@@ -103,14 +103,14 @@ public class VikunjaClient {
         appendLine(sb, "Billing mode", info.getBillingPeriodType());
         if ("hourly_balance".equals(info.getBillingPeriodType())) {
             appendLine(sb, "Hourly rate", formatHourlyRate(info));
-            appendLine(sb, "Next balance check", info.getNextBalanceCheckDate());
+            appendLine(sb, "Next balance check", VpsDateFormat.toDisplayDate(info.getNextBalanceCheckDate()));
         } else {
             appendLine(sb, "Billing cycle", info.getBillingCycle());
             if (info.getBillingPeriodDays() > 0) {
                 appendLine(sb, "Billing period days", Integer.toString(info.getBillingPeriodDays()));
             }
             appendLine(sb, "Price", formatPrice(info));
-            appendLine(sb, "Cancel by", info.getCancelByDate());
+            appendLine(sb, "Cancel by", VpsDateFormat.toDisplayDate(info.getCancelByDate()));
             appendLine(sb, "Auto-pay", info.isAutoPay() ? "yes" : "no");
         }
         appendLine(sb, "Status", info.getVpsStatus());

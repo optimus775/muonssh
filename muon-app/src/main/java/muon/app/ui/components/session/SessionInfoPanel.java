@@ -8,18 +8,20 @@ import muon.app.ui.components.common.SkinnedTextField;
 import muon.app.ui.components.common.TabbedPanel;
 import muon.app.util.enums.JumpType;
 import muon.app.vps.ProviderRecord;
+import muon.app.vps.VpsDateFormat;
 import muon.app.vps.VpsProviderRepository;
 
 import javax.swing.*;
+import javax.swing.border.TitledBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.text.JTextComponent;
 import java.awt.*;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.io.File;
 import java.nio.file.Files;
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -32,6 +34,9 @@ public class SessionInfoPanel extends JPanel {
     public static final int DEFAULT_MAX_PORT = 65535;
     private static final long serialVersionUID = 6679029920589652547L;
     private static final String ORIG_COMBO_RENDERER = "orig.combo.renderer";
+    private static final String BILLING_MODE_CONTROL = "billing.mode.control";
+    private static final String BILLING_MODE_LABEL = "billing.mode.label";
+    private static final String ORIGINAL_FOREGROUND = "billing.mode.original.foreground";
     private JTextField inpHostName;
     private JTextField inpUserName;
     private JPasswordField inpPassword;
@@ -129,8 +134,8 @@ public class SessionInfoPanel extends JPanel {
         if (info != null) {
             applySftpOnlyState(info.isSftpOnly(), false);
         }
-        updateBillingModeState();
         applyReadOnlyColors(editable);
+        updateBillingModeState();
     }
 
     private void applyEditability(Component component, boolean editable) {
@@ -167,6 +172,7 @@ public class SessionInfoPanel extends JPanel {
         for (Component c : getAllComponents(this)) {
             boolean formControl = c instanceof JTextComponent || c instanceof JComboBox || c instanceof JSpinner || c instanceof JCheckBox || c instanceof JButton;
             if (!formControl) continue;
+            if (editable && isBillingModeComponent(c)) continue;
 
             boolean readOnlyText = c instanceof JTextComponent && !((JTextComponent) c).isEditable();
             boolean disabled = !c.isEnabled();
@@ -271,31 +277,19 @@ public class SessionInfoPanel extends JPanel {
             return false;
         }
         boolean hourlyBilling = "hourly".equals(selectedBillingMode());
-        if (!hourlyBilling && !isValidOptionalDate(inpNextPaymentDate.getText())) {
-            showError("Next payment date must be empty or use YYYY-MM-DD");
+        if (!hourlyBilling && !normalizeDateField(inpNextPaymentDate, value -> info.setNextPaymentDate(value))) {
+            showError("Next payment date must be empty or use DD-MM-YYYY / DD-MM");
             return false;
         }
-        if (!hourlyBilling && !isValidOptionalDate(inpCancelByDate.getText())) {
-            showError("Cancel-by date must be empty or use YYYY-MM-DD");
+        if (!hourlyBilling && !normalizeDateField(inpCancelByDate, value -> info.setCancelByDate(value))) {
+            showError("Cancel-by date must be empty or use DD-MM-YYYY / DD-MM");
             return false;
         }
-        if (hourlyBilling && !isValidOptionalDate(inpNextBalanceCheckDate.getText())) {
-            showError("Next balance check date must be empty or use YYYY-MM-DD");
+        if (hourlyBilling && !normalizeDateField(inpNextBalanceCheckDate, value -> info.setNextBalanceCheckDate(value))) {
+            showError("Next balance check date must be empty or use DD-MM-YYYY / DD-MM");
             return false;
         }
         return true;
-    }
-
-    private boolean isValidOptionalDate(String value) {
-        if (value == null || value.isBlank()) {
-            return true;
-        }
-        try {
-            LocalDate.parse(value.trim());
-            return true;
-        } catch (DateTimeParseException e) {
-            return false;
-        }
     }
 
     public void setSessionInfo(SessionInfo info) {
@@ -479,16 +473,16 @@ public class SessionInfoPanel extends JPanel {
         inpCurrency = new SkinnedTextField(10);
         bindText(inpCurrency, value -> info.setCurrency(value));
         inpNextPaymentDate = new SkinnedTextField(10);
-        inpNextPaymentDate.setToolTipText("YYYY-MM-DD");
-        bindText(inpNextPaymentDate, value -> info.setNextPaymentDate(value));
+        inpNextPaymentDate.setToolTipText(VpsDateFormat.DISPLAY_PATTERN + " or DD-MM");
+        bindDateText(inpNextPaymentDate, value -> info.setNextPaymentDate(value));
         inpHourlyRate = new SkinnedTextField(10);
         bindText(inpHourlyRate, value -> info.setHourlyRate(value));
         inpNextBalanceCheckDate = new SkinnedTextField(10);
-        inpNextBalanceCheckDate.setToolTipText("YYYY-MM-DD");
-        bindText(inpNextBalanceCheckDate, value -> info.setNextBalanceCheckDate(value));
+        inpNextBalanceCheckDate.setToolTipText(VpsDateFormat.DISPLAY_PATTERN + " or DD-MM");
+        bindDateText(inpNextBalanceCheckDate, value -> info.setNextBalanceCheckDate(value));
         inpCancelByDate = new SkinnedTextField(10);
-        inpCancelByDate.setToolTipText("YYYY-MM-DD");
-        bindText(inpCancelByDate, value -> info.setCancelByDate(value));
+        inpCancelByDate.setToolTipText(VpsDateFormat.DISPLAY_PATTERN + " or DD-MM");
+        bindDateText(inpCancelByDate, value -> info.setCancelByDate(value));
 
         chkAutoPay = new JCheckBox("Auto-pay enabled");
         chkAutoPay.addActionListener(e -> {
@@ -614,7 +608,9 @@ public class SessionInfoPanel extends JPanel {
         labelConstraints.insets = scaleInsets(3, 8, 3, 8);
         labelConstraints.anchor = GridBagConstraints.LINE_START;
         if (!label.isEmpty()) {
-            panel.add(new JLabel(label), labelConstraints);
+            JLabel labelComponent = new JLabel(label);
+            markBillingModeLabel(labelComponent);
+            panel.add(labelComponent, labelConstraints);
         }
 
         GridBagConstraints fieldConstraints = new GridBagConstraints();
@@ -625,6 +621,7 @@ public class SessionInfoPanel extends JPanel {
         fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
         fieldConstraints.anchor = GridBagConstraints.LINE_START;
         panel.add(component, fieldConstraints);
+        markBillingModeControl(component);
     }
 
     private void addSectionRow(JPanel panel, Component component, int row, Insets insets) {
@@ -636,6 +633,34 @@ public class SessionInfoPanel extends JPanel {
         c.fill = GridBagConstraints.HORIZONTAL;
         c.anchor = GridBagConstraints.LINE_START;
         panel.add(component, c);
+    }
+
+    private void markBillingModeControl(Component component) {
+        if (component instanceof JComponent) {
+            ((JComponent) component).putClientProperty(BILLING_MODE_CONTROL, Boolean.TRUE);
+        }
+        if (component instanceof JSpinner) {
+            JComponent editor = ((JSpinner) component).getEditor();
+            if (editor instanceof JSpinner.DefaultEditor) {
+                ((JSpinner.DefaultEditor) editor).getTextField()
+                        .putClientProperty(BILLING_MODE_CONTROL, Boolean.TRUE);
+            }
+        }
+        if (component instanceof Container) {
+            for (Component child : ((Container) component).getComponents()) {
+                markBillingModeControl(child);
+            }
+        }
+    }
+
+    private void markBillingModeLabel(JLabel label) {
+        label.putClientProperty(BILLING_MODE_LABEL, Boolean.TRUE);
+        label.putClientProperty(ORIGINAL_FOREGROUND, label.getForeground());
+    }
+
+    private boolean isBillingModeComponent(Component component) {
+        return component instanceof JComponent
+                && Boolean.TRUE.equals(((JComponent) component).getClientProperty(BILLING_MODE_CONTROL));
     }
 
     private ProviderRecord getSelectedProvider() {
@@ -724,6 +749,44 @@ public class SessionInfoPanel extends JPanel {
         });
     }
 
+    private void bindDateText(JTextComponent component, Consumer<String> setter) {
+        bindText(component, value -> setter.accept(toDateStorageOrRaw(value)));
+        component.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent e) {
+                normalizeDateField(component, setter);
+            }
+        });
+    }
+
+    private String toDateStorageOrRaw(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        if (!VpsDateFormat.isValidOptional(value)) {
+            return value;
+        }
+        return VpsDateFormat.toStorageDate(value);
+    }
+
+    private boolean normalizeDateField(JTextComponent component, Consumer<String> setter) {
+        String value = component.getText();
+        if (value == null || value.isBlank()) {
+            setter.accept("");
+            return true;
+        }
+        if (!VpsDateFormat.isValidOptional(value)) {
+            return false;
+        }
+        String storageDate = VpsDateFormat.toStorageDate(value);
+        String displayDate = VpsDateFormat.toDisplayDate(storageDate);
+        setter.accept(storageDate);
+        if (!displayDate.equals(value)) {
+            component.setText(displayDate);
+        }
+        return true;
+    }
+
     private void touchAndNotify() {
         notifyChange();
     }
@@ -735,8 +798,9 @@ public class SessionInfoPanel extends JPanel {
         }
         applyBillingModeToInfo(mode);
         updateBillingModeState();
-        touchAndNotify();
         applyReadOnlyColors(editable);
+        updateBillingModeState();
+        touchAndNotify();
     }
 
     private void applyBillingModeToInfo(String mode) {
@@ -809,39 +873,88 @@ public class SessionInfoPanel extends JPanel {
         radBillingPeriod.setEnabled(canEdit);
         radBillingDays.setEnabled(canEdit);
         radBillingHourly.setEnabled(canEdit);
-        setBillingControlsEnabled(billingPeriodPanel, canEdit && period);
-        setBillingControlsEnabled(billingDaysPanel, canEdit && days);
-        setBillingControlsEnabled(billingHourlyPanel, canEdit && hourly);
-        setBillingControlsEnabled(fixedPaymentPanel, canEdit && !hourly);
+        setBillingGroupState(billingPeriodPanel, period, canEdit);
+        setBillingGroupState(billingDaysPanel, days, canEdit);
+        setBillingGroupState(billingHourlyPanel, hourly, canEdit);
+        setBillingGroupState(fixedPaymentPanel, !hourly, canEdit);
         inpCurrency.setEnabled(canEdit);
         inpCurrency.setEditable(canEdit);
         inpCurrency.setFocusable(canEdit);
     }
 
-    private void setBillingControlsEnabled(Component component, boolean enabled) {
+    private void setBillingGroupState(Component component, boolean active, boolean canEdit) {
         if (component == null) {
             return;
         }
-        component.setEnabled(enabled);
+        boolean controlEnabled = active && canEdit;
+        component.setEnabled(canEdit);
+        if (component instanceof JPanel) {
+            updateBillingPanelTitle((JPanel) component, active);
+        }
+        if (component instanceof JLabel && Boolean.TRUE.equals(((JLabel) component).getClientProperty(BILLING_MODE_LABEL))) {
+            applyBillingLabelColor((JLabel) component, active);
+            component.setEnabled(true);
+            return;
+        }
         if (component instanceof JTextComponent) {
             JTextComponent textComponent = (JTextComponent) component;
-            textComponent.setEditable(enabled);
-            textComponent.setFocusable(enabled);
+            textComponent.setEnabled(true);
+            textComponent.setEditable(controlEnabled);
+            textComponent.setFocusable(controlEnabled);
+            textComponent.setBackground(null);
+            textComponent.setForeground(null);
+            textComponent.setDisabledTextColor(UIManager.getColor("TextField.foreground"));
+            textComponent.setCaretColor(UIManager.getColor("TextField.foreground"));
+            return;
+        }
+        if (component instanceof JComboBox || component instanceof AbstractButton) {
+            component.setEnabled(controlEnabled);
+            if (component instanceof AbstractButton) {
+                ((AbstractButton) component).setForeground(active ? null : getMutedBillingColor());
+            }
         }
         if (component instanceof JSpinner) {
             JSpinner spinner = (JSpinner) component;
+            spinner.setEnabled(controlEnabled);
             JComponent editor = spinner.getEditor();
             if (editor instanceof JSpinner.DefaultEditor) {
                 JTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
-                textField.setEnabled(enabled);
-                textField.setEditable(enabled);
+                textField.setEnabled(true);
+                textField.setEditable(controlEnabled);
+                textField.setFocusable(controlEnabled);
+                textField.setBackground(null);
+                textField.setForeground(null);
             }
         }
         if (component instanceof Container) {
             for (Component child : ((Container) component).getComponents()) {
-                setBillingControlsEnabled(child, enabled);
+                setBillingGroupState(child, active, canEdit);
             }
         }
+    }
+
+    private void updateBillingPanelTitle(JPanel panel, boolean active) {
+        if (panel.getBorder() instanceof TitledBorder) {
+            ((TitledBorder) panel.getBorder()).setTitleColor(active ? getDefaultBillingColor(panel) : getMutedBillingColor());
+        }
+    }
+
+    private void applyBillingLabelColor(JLabel label, boolean active) {
+        label.setForeground(active ? getDefaultBillingColor(label) : getMutedBillingColor());
+    }
+
+    private Color getDefaultBillingColor(JComponent component) {
+        Object original = component.getClientProperty(ORIGINAL_FOREGROUND);
+        if (original instanceof Color) {
+            return (Color) original;
+        }
+        Color color = UIManager.getColor("Label.foreground");
+        return color == null ? component.getForeground() : color;
+    }
+
+    private Color getMutedBillingColor() {
+        Color color = App.getCONTEXT().getSkin().getReadOnlyFieldForeground();
+        return color == null ? UIManager.getColor("Label.disabledForeground") : color;
     }
 
     private void setVpsFields(SessionInfo info) {
@@ -858,10 +971,10 @@ public class SessionInfoPanel extends JPanel {
         billingCycleDaysModel.setValue(periodDays <= 0 ? 30 : periodDays);
         inpPrice.setText(info.getPrice());
         inpCurrency.setText(info.getCurrency() == null ? "USD" : info.getCurrency());
-        inpNextPaymentDate.setText(info.getNextPaymentDate());
+        inpNextPaymentDate.setText(VpsDateFormat.toDisplayDate(info.getNextPaymentDate()));
         inpHourlyRate.setText(info.getHourlyRate());
-        inpNextBalanceCheckDate.setText(info.getNextBalanceCheckDate());
-        inpCancelByDate.setText(info.getCancelByDate());
+        inpNextBalanceCheckDate.setText(VpsDateFormat.toDisplayDate(info.getNextBalanceCheckDate()));
+        inpCancelByDate.setText(VpsDateFormat.toDisplayDate(info.getCancelByDate()));
         chkAutoPay.setSelected(info.isAutoPay());
         cmbVpsStatus.setSelectedItem(info.getVpsStatus() == null ? "active" : info.getVpsStatus());
         inpTags.setText(info.getTags());

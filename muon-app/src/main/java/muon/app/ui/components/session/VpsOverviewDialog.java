@@ -2,6 +2,7 @@ package muon.app.ui.components.session;
 
 import muon.app.App;
 import muon.app.ui.components.common.SkinnedScrollPane;
+import muon.app.vps.VpsDateFormat;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -96,7 +97,7 @@ public class VpsOverviewDialog extends JDialog {
                     info.getProvider(),
                     info.getBillingPeriodType(),
                     info.getVpsStatus(),
-                    getDueDate(info),
+                    VpsDateFormat.toDisplayDate(getDueDate(info)),
                     formatPrice(info),
                     info.getTags()
             });
@@ -124,7 +125,7 @@ public class VpsOverviewDialog extends JDialog {
             return true;
         }
         try {
-            LocalDate due = LocalDate.parse(date.trim());
+            LocalDate due = VpsDateFormat.parse(date);
             LocalDate now = LocalDate.now();
             return !due.isBefore(now) && !due.isAfter(now.plusDays(days));
         } catch (DateTimeParseException e) {
