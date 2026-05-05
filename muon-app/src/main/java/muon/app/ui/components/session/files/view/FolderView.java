@@ -234,12 +234,10 @@ public class FolderView extends JPanel {
                             listener.openApp(fileInfo);
                         }
                     }
-                } else if (e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3) {
+                } else if (isPopupRequest(e)) {
                     selectRow(e);
                     log.debug("called");
-                    listener.createMenu(popup, getSelectedFiles());
-                    popup.pack();
-                    popup.show(table, e.getX(), e.getY());
+                    showPopupMenu(listener, table, e.getX(), e.getY());
                 }
             }
         });
@@ -248,6 +246,15 @@ public class FolderView extends JPanel {
 
         tableScroller = new SkinnedScrollPane(table);
         table.setRowHeight(r1.getHeight());
+        tableScroller.getViewport().addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (isPopupRequest(e)) {
+                    table.clearSelection();
+                    showPopupMenu(listener, e.getComponent(), e.getX(), e.getY());
+                }
+            }
+        });
 
         resizeColumnWidth(table);
 
@@ -285,12 +292,10 @@ public class FolderView extends JPanel {
                             listener.openApp(fileInfo);
                         }
                     }
-                } else if (e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3) {
+                } else if (isPopupRequest(e)) {
                     selectRow(e);
                     log.debug("called");
-                    listener.createMenu(popup, getSelectedFiles());
-                    popup.pack();
-                    popup.show(table, e.getX(), e.getY());
+                    showPopupMenu(listener, table, e.getX(), e.getY());
                 }
             }
         });
@@ -313,6 +318,17 @@ public class FolderView extends JPanel {
                 }
             }
             table.setRowSelectionInterval(r, r);
+        }
+    }
+
+    private boolean isPopupRequest(MouseEvent e) {
+        return e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3;
+    }
+
+    private void showPopupMenu(FolderViewEventListener listener, Component invoker, int x, int y) {
+        if (listener.createMenu(popup, getSelectedFiles())) {
+            popup.pack();
+            popup.show(invoker, x, y);
         }
     }
 
