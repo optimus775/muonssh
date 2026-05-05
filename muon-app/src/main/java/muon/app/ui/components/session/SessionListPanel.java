@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
 import muon.app.ui.AppWindow;
 import muon.app.ui.components.common.SkinnedScrollPane;
+import muon.app.ui.components.session.dialog.NewSessionDlg;
 import muon.app.util.FontAwesomeContants;
 
 import javax.swing.*;
@@ -100,21 +101,11 @@ public class SessionListPanel extends JPanel {
         sessionList.addMouseMotionListener(new MouseAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
-                int index = sessionList.locationToIndex(e.getPoint());
+                int index = getCellIndex(e.getPoint());
                 if (index != -1) {
-                    Rectangle r = sessionList.getCellBounds(index, index);
-                    if (r != null && r.contains(e.getPoint())) {
-                        int x = e.getPoint().x;
-                        int y = e.getPoint().y;
-
-                        int rightPad = scale(30);
-                        int vPad = scale(10);
-
-                        if (x > r.x + r.width - rightPad && x < r.x + r.width &&
-                                y > r.y + vPad && y < r.y + r.height - vPad) {
-                            sessionList.setCursor(HAND_CURSOR);
-                            return;
-                        }
+                    if (isCloseClick(index, e.getPoint()) || sessionListModel.get(index) instanceof SessionContentPanel) {
+                        sessionList.setCursor(HAND_CURSOR);
+                        return;
                     }
                 }
                 sessionList.setCursor(DEFAULT_CURSOR);
@@ -126,23 +117,19 @@ public class SessionListPanel extends JPanel {
         sessionList.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                int selectedIndex = sessionList.getSelectedIndex();
-                int index = sessionList.locationToIndex(e.getPoint());
-                if (index != -1 && selectedIndex == index) {
-                    Rectangle r = sessionList.getCellBounds(index, index);
-                    if (r != null && r.contains(e.getPoint())) {
-                        int x = e.getPoint().x;
-                        int y = e.getPoint().y;
-                        int rightPad = scale(30);
-                        int vPad = scale(10);
-
-                        if (x > r.x + r.width - rightPad && x < r.x + r.width &&
-                                y > r.y + vPad && y < r.y + r.height - vPad) {
-                            log.info("Clicked on: {}", index);
-                            removeSession(index);
-                        }
-                    }
+                if (!SwingUtilities.isLeftMouseButton(e)) {
+                    return;
                 }
+                int index = getCellIndex(e.getPoint());
+                if (index == -1) {
+                    return;
+                }
+                if (isCloseClick(index, e.getPoint())) {
+                    log.info("Clicked on disconnect for session: {}", index);
+                    removeSession(index);
+                    return;
+                }
+                openSessionManager(index);
             }
 
             @Override
@@ -150,6 +137,41 @@ public class SessionListPanel extends JPanel {
                 sessionList.setCursor(DEFAULT_CURSOR);
             }
         });
+    }
+
+    private int getCellIndex(Point point) {
+        int index = sessionList.locationToIndex(point);
+        if (index == -1) {
+            return -1;
+        }
+        Rectangle bounds = sessionList.getCellBounds(index, index);
+        return bounds != null && bounds.contains(point) ? index : -1;
+    }
+
+    private boolean isCloseClick(int index, Point point) {
+        Rectangle r = sessionList.getCellBounds(index, index);
+        if (r == null || !r.contains(point)) {
+            return false;
+        }
+        int rightPad = scale(30);
+        int vPad = scale(10);
+        int x = point.x;
+        int y = point.y;
+        return x > r.x + r.width - rightPad && x < r.x + r.width
+                && y > r.y + vPad && y < r.y + r.height - vPad;
+    }
+
+    private void openSessionManager(int index) {
+        ISessionContentPanel sessionContentPanel = sessionListModel.get(index);
+        if (!(sessionContentPanel instanceof SessionContentPanel) || sessionContentPanel.getInfo() == null) {
+            return;
+        }
+        int activeSessionId = sessionContentPanel.getActiveSessionId();
+        SessionInfo info = new NewSessionDlg(window, sessionContentPanel.getInfo(),
+                () -> removeSessionByActiveSessionId(activeSessionId, false)).newSession();
+        if (info != null) {
+            createSession(info);
+        }
     }
 
     public void createSession(SessionInfo info) {
@@ -170,8 +192,12 @@ public class SessionListPanel extends JPanel {
         window.repaint();
     }
 
-    public void removeSession(int index) {
-        if (!App.getGlobalSettings().isConfirmBeforeTerminalClosing() ||
+    public boolean removeSession(int index) {
+        return removeSession(index, true);
+    }
+
+    private boolean removeSession(int index, boolean confirm) {
+        if (!confirm || !App.getGlobalSettings().isConfirmBeforeTerminalClosing() ||
                 JOptionPane.showConfirmDialog(window, App.getCONTEXT().getBundle().getString("disconnect_session"))
                         == JOptionPane.YES_OPTION) {
             ISessionContentPanel sessionContentPanel = sessionListModel.get(index);
@@ -181,14 +207,25 @@ public class SessionListPanel extends JPanel {
             window.repaint();
             sessionListModel.remove(index);
             if (sessionListModel.isEmpty()) {
-                return;
+                return true;
             }
             if (index == sessionListModel.size()) {
                 sessionList.setSelectedIndex(index - 1);
             } else {
                 sessionList.setSelectedIndex(index);
             }
+            return true;
         }
+        return false;
+    }
+
+    private boolean removeSessionByActiveSessionId(int activeSessionId, boolean confirm) {
+        for (int i = 0; i < sessionListModel.size(); i++) {
+            if (sessionListModel.get(i).getActiveSessionId() == activeSessionId) {
+                return removeSession(i, confirm);
+            }
+        }
+        return false;
     }
 
     public ISessionContentPanel getSessionContainer(int activeSessionId) {

@@ -39,11 +39,14 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
     private JButton btnConnect;
     private JButton btnCancel;
     private JButton btnEdit;
+    private JButton btnDisconnect;
     private boolean editMode = false;
     private boolean pendingEditOnSelect = false;
     private JTextField txtName;
     private NamedItem selectedInfo;
     private SessionInfo info;
+    private final String initialSelectionId;
+    private final Runnable disconnectAction;
     private JLabel lblName;
     private JPopupMenu groupPopupMenu;
     private boolean sorting;
@@ -54,7 +57,13 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
     private static final String EMPTY_ROOT = "Empty_Root";
 
     public NewSessionDlg(Window wnd) {
+        this(wnd, null, null);
+    }
+
+    public NewSessionDlg(Window wnd, SessionInfo initialSession, Runnable disconnectAction) {
         super(wnd);
+        this.initialSelectionId = initialSession == null ? null : initialSession.getId();
+        this.disconnectAction = disconnectAction;
         createUI();
     }
 
@@ -147,6 +156,11 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         btnCancel.addActionListener(this);
         btnCancel.putClientProperty(BUTTON_NAME, "btnCancel");
 
+        btnDisconnect = new JButton("Disconnect");
+        btnDisconnect.addActionListener(this);
+        btnDisconnect.putClientProperty(BUTTON_NAME, "btnDisconnect");
+        btnDisconnect.setVisible(disconnectAction != null);
+
         JButton btnExport = new JButton(App.getCONTEXT().getBundle().getString("export"));
         btnExport.addActionListener(this);
         btnExport.putClientProperty(BUTTON_NAME, "btnExport");
@@ -163,6 +177,7 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
 
         Box box1 = Box.createHorizontalBox();
         box1.setBorder(getScaledEmptyBorder(10, 10, 10, 10));
+        box1.add(btnDisconnect);
         box1.add(Box.createHorizontalGlue());
         box1.add(Box.createHorizontalStrut(10));
         box1.add(btnEdit);
@@ -291,6 +306,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         suppressTreeEvents = true;
         rootNode = treeManager.loadTree(SessionStore.load(), treeModel, tree);
         sortTreeAndKeepSelection();
+        if (initialSelectionId != null) {
+            selectNodeById(initialSelectionId, getTreeRoot());
+        }
         suppressTreeEvents = false;
         clearDirty();
     }
@@ -428,6 +446,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             case "btnConnect":
                 connectClicked();
                 break;
+            case "btnDisconnect":
+                disconnectClicked();
+                break;
             case "btnCancel":
                 if (confirmClose()) {
                     dispose();
@@ -445,6 +466,22 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             default:
                 break;
         }
+    }
+
+    private void disconnectClicked() {
+        if (disconnectAction == null) {
+            return;
+        }
+        if (!confirmClose()) {
+            return;
+        }
+        if (App.getGlobalSettings().isConfirmBeforeTerminalClosing()
+                && JOptionPane.showConfirmDialog(this, App.getCONTEXT().getBundle().getString("disconnect_session"))
+                != JOptionPane.YES_OPTION) {
+            return;
+        }
+        disconnectAction.run();
+        dispose();
     }
 
     private void showVpsOverview() {

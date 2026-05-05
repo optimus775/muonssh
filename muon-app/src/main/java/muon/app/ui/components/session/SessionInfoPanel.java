@@ -1516,6 +1516,7 @@ public class SessionInfoPanel extends JPanel {
         inpKeyBrowse.addActionListener(e -> {
             JFileChooser jfc = new JFileChooser();
             jfc.setFileHidingEnabled(false);
+            jfc.setCurrentDirectory(getDefaultSshDirectory());
 
             jfc.addChoosableFileFilter(new FileNameExtensionFilter("Putty key files (*.ppk)", "ppk"));
 
@@ -1669,6 +1670,11 @@ public class SessionInfoPanel extends JPanel {
             info.setJumpType(JumpType.TCP_FORWARDING);
         }
         notifyChange();
+    }
+
+    private File getDefaultSshDirectory() {
+        File sshDirectory = new File(System.getProperty("user.home"), ".ssh");
+        return sshDirectory.isDirectory() ? sshDirectory : new File(System.getProperty("user.home"));
     }
 
     private boolean isSupportedPuttyKeyFile(File file) {
