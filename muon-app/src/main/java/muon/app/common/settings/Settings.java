@@ -34,7 +34,7 @@ public class Settings {
     private boolean startMaximized = true;
     private boolean rememberLastSizeAndPosition = false;
     private boolean confirmBeforeMoveOrCopy = false;
-    private boolean showHiddenFilesByDefault = false;
+    private boolean showHiddenFilesByDefault = true;
     private boolean firstFileBrowserView = false;
     private boolean firstLocalViewInFileBrowser = false;
     private boolean transferTemporaryDirectory = false;
