@@ -1,5 +1,7 @@
 package muon.app.ui.components.session.terminal;
 
+import com.jediterm.core.util.TermSize;
+import com.jediterm.terminal.model.JediTerminal;
 import com.jediterm.terminal.ui.JediTermWidget;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -129,7 +131,15 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
     }
 
     public void start() {
+        syncTtySize();
         term.start();
+    }
+
+    private void syncTtySize() {
+        TermSize size = term.getTerminalPanel().getTerminalSizeFromComponent();
+        if (tty != null && size != null) {
+            tty.resize(JediTerminal.ensureTermMinimumSize(size));
+        }
     }
 
     private void scheduleAutoReconnect() {
@@ -173,6 +183,7 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
         tty = new SshTtyConnector(info, initialCommand, sessionContentPanel);
         term.setTtyConnector(tty);
         term.getTerminal().setCursorVisible(true);
+        syncTtySize();
         term.start();
         scheduleReconnectCheck();
     }

@@ -8,6 +8,7 @@ import muon.app.ssh.SSHHandler;
 import muon.app.ui.components.session.SessionContentPanel;
 import muon.app.ui.components.session.SessionInfo;
 import net.schmizz.sshj.connection.ConnectionException;
+import net.schmizz.sshj.connection.channel.direct.PTYMode;
 import net.schmizz.sshj.connection.channel.direct.Session;
 import net.schmizz.sshj.connection.channel.direct.Session.Shell;
 import net.schmizz.sshj.connection.channel.direct.SessionChannel;
@@ -20,7 +21,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
@@ -53,8 +55,9 @@ public class SshTtyConnector implements DisposableTtyConnector {
             this.channel = wr.openSession();
             this.channel.setAutoExpand(true);
 
-            this.channel.allocatePTY(App.getGlobalSettings().getTerminalType(), App.getGlobalSettings().getTermWidth(),
-                                     App.getGlobalSettings().getTermHeight(), 0, 0, Collections.emptyMap());
+            Dimension initialSize = getInitialTermSize();
+            this.channel.allocatePTY(App.getGlobalSettings().getTerminalType(), initialSize.width,
+                                     initialSize.height, 0, 0, createPtyModes());
 
             setEnvVar();
 
@@ -126,7 +129,7 @@ public class SshTtyConnector implements DisposableTtyConnector {
     public void resize(Dimension termSize, Dimension pixelSize) {
         myPendingTermSize = termSize;
         myPendingPixelSize = pixelSize;
-        if (channel != null) {
+        if (channel != null && shell != null) {
             resizeImmediately();
         }
 
@@ -217,12 +220,40 @@ public class SshTtyConnector implements DisposableTtyConnector {
     }
 
     private void resizeImmediately() {
-        if (myPendingTermSize != null && myPendingPixelSize != null) {
-            setPtySize(shell, myPendingTermSize.width, myPendingTermSize.height, myPendingPixelSize.width,
-                       myPendingPixelSize.height);
-            myPendingTermSize = null;
-            myPendingPixelSize = null;
+        if (shell == null || myPendingTermSize == null || myPendingPixelSize == null) {
+            return;
         }
+        setPtySize(shell, myPendingTermSize.width, myPendingTermSize.height, myPendingPixelSize.width,
+                   myPendingPixelSize.height);
+        myPendingTermSize = null;
+        myPendingPixelSize = null;
+    }
+
+    private Dimension getInitialTermSize() {
+        if (myPendingTermSize != null) {
+            return myPendingTermSize;
+        }
+        return new Dimension(App.getGlobalSettings().getTermWidth(), App.getGlobalSettings().getTermHeight());
+    }
+
+    private static Map<PTYMode, Integer> createPtyModes() {
+        Map<PTYMode, Integer> modes = new EnumMap<>(PTYMode.class);
+        modes.put(PTYMode.ICRNL, 1);
+        modes.put(PTYMode.IXON, 1);
+        modes.put(PTYMode.ISIG, 1);
+        modes.put(PTYMode.ICANON, 1);
+        modes.put(PTYMode.ECHO, 1);
+        modes.put(PTYMode.ECHOE, 1);
+        modes.put(PTYMode.ECHOK, 1);
+        modes.put(PTYMode.ECHOCTL, 1);
+        modes.put(PTYMode.ECHOKE, 1);
+        modes.put(PTYMode.IEXTEN, 1);
+        modes.put(PTYMode.OPOST, 1);
+        modes.put(PTYMode.ONLCR, 1);
+        modes.put(PTYMode.CS8, 1);
+        modes.put(PTYMode.TTY_OP_ISPEED, 38400);
+        modes.put(PTYMode.TTY_OP_OSPEED, 38400);
+        return modes;
     }
 
     private void setPtySize(Shell shell, int col, int row, int wp, int hp) {

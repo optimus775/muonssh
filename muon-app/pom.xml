@@ -7,7 +7,7 @@
     <parent>
         <groupId>muon</groupId>
         <artifactId>muon</artifactId>
-        <version>3.18.1</version>
+        <version>3.18.2</version>
     </parent>
     <groupId>muon-app</groupId>
     <artifactId>muon-app</artifactId>

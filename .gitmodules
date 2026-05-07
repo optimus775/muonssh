@@ -1,4 +1,0 @@
-[submodule "muon-jediterm"]
-	path = muon-jediterm
-	url = https://github.com/devlinx9/muon-jediterm.git
-	branch = master
