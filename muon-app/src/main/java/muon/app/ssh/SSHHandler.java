@@ -433,11 +433,9 @@ public class SSHHandler implements Closeable {
     }
 
     public void disconnect() {
-        if (closed.get()) {
+        if (!closed.compareAndSet(false, true)) {
             log.info("Already closed: {}", info);
-            return;
         }
-        closed.set(true);
         try {
             if (sshj != null) {
                 sshj.disconnect();
@@ -505,7 +503,7 @@ public class SSHHandler implements Closeable {
         ss.setReuseAddress(true);
         ss.bind(new InetSocketAddress(LOCALHOST, 0));
         int port = ss.getLocalPort();
-        new Thread(() -> {
+        Thread forwarderThread = new Thread(() -> {
             try {
                 this.previousHop
                         .newLocalPortForwarder(
@@ -514,7 +512,9 @@ public class SSHHandler implements Closeable {
             } catch (IOException e) {
                 log.error(e.getMessage(), e);
             }
-        }).start();
+        }, "SSH-Jump-PortForward-" + info.getHost());
+        forwarderThread.setDaemon(true);
+        forwarderThread.start();
         while (!ss.isBound()) {
             Thread.sleep(100);
         }

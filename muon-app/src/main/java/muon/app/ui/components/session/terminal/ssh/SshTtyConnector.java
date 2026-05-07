@@ -96,10 +96,27 @@ public class SshTtyConnector implements DisposableTtyConnector {
 
     @Override
     public void close() {
+        stopFlag.set(true);
+        isCancelled.set(true);
+        log.info("Terminal wrapper disconnecting");
         try {
-            stopFlag.set(true);
-            log.info("Terminal wrapper disconnecting");
-            wr.disconnect();
+            if (myInputStreamReader != null) {
+                myInputStreamReader.close();
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+        }
+        try {
+            if (myOutputStream != null) {
+                myOutputStream.close();
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+        }
+        try {
+            if (wr != null) {
+                wr.disconnect();
+            }
         } catch (Exception e) {
             log.error(e.getMessage(), e);
         }

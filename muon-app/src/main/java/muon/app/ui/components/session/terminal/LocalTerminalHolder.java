@@ -116,9 +116,9 @@ public class LocalTerminalHolder extends Page implements AutoCloseable {
     public void close() {
         Component[] components = tabs.getTabContents();
         for (Component component : components) {
-            if (component instanceof TerminalComponent) {
+            if (component instanceof LocalTerminalComponent) {
                 log.info("Closing terminal: {}", component);
-                ((TerminalComponent) component).close();
+                ((LocalTerminalComponent) component).close();
             }
         }
         revalidate();

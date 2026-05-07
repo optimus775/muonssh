@@ -12,6 +12,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 import static muon.app.util.Constants.SMALL_TEXT_SIZE;
 import static muon.app.util.ScalingUtil.getScaledEmptyBorder;
@@ -194,6 +196,20 @@ public class SessionListPanel extends JPanel {
 
     public boolean removeSession(int index) {
         return removeSession(index, true);
+    }
+
+    public void closeAllSessionsForShutdown() {
+        List<ISessionContentPanel> sessions = new ArrayList<>();
+        for (int i = 0; i < sessionListModel.size(); i++) {
+            sessions.add(sessionListModel.get(i));
+        }
+        for (ISessionContentPanel session : sessions) {
+            try {
+                session.closeForShutdown();
+            } catch (Exception e) {
+                log.error("Failed to close session during shutdown", e);
+            }
+        }
     }
 
     private boolean removeSession(int index, boolean confirm) {

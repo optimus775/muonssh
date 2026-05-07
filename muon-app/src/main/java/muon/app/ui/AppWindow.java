@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.prefs.Preferences;
 
 import static muon.app.util.Constants.*;
@@ -44,6 +45,7 @@ public class AppWindow extends JFrame {
     private final BackgroundTransferPanel downloadPanel;
     private final KubeContextSelectorPanel kubeContextSelectorPanel;
     private final Component bottomPanel;
+    private final AtomicBoolean shutdownStarted = new AtomicBoolean(false);
 
     // Load stored preferences
     static final Preferences prefs = Preferences.userRoot().node("muonPrefs");
@@ -192,7 +194,7 @@ public class AppWindow extends JFrame {
         } catch (Exception e) {
             log.error(e.getMessage(), e);
         }
-        this.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        this.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
         setWindowsSizeAndPosition();
 
@@ -200,13 +202,43 @@ public class AppWindow extends JFrame {
         this.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                Rectangle bounds = getBounds();
-                prefs.putInt(PREF_X, bounds.x);
-                prefs.putInt(PREF_Y, bounds.y);
-                prefs.putInt(PREF_WIDTH, bounds.width);
-                prefs.putInt(PREF_HEIGHT, bounds.height);
+                shutdownApplication(true);
             }
         });
+    }
+
+    public void shutdownApplication(boolean exitJvm) {
+        if (!shutdownStarted.compareAndSet(false, true)) {
+            return;
+        }
+
+        log.info("Shutting down application");
+        saveWindowBounds();
+        if (sessionListPanel != null) {
+            sessionListPanel.closeAllSessionsForShutdown();
+        }
+
+        if (exitJvm) {
+            disposeApplicationWindows();
+            dispose();
+            System.exit(0);
+        }
+    }
+
+    private void saveWindowBounds() {
+        Rectangle bounds = getBounds();
+        prefs.putInt(PREF_X, bounds.x);
+        prefs.putInt(PREF_Y, bounds.y);
+        prefs.putInt(PREF_WIDTH, bounds.width);
+        prefs.putInt(PREF_HEIGHT, bounds.height);
+    }
+
+    private void disposeApplicationWindows() {
+        for (Window window : Window.getWindows()) {
+            if (window != this) {
+                window.dispose();
+            }
+        }
     }
 
     private void checkForUpdates() {
@@ -608,6 +640,11 @@ public class AppWindow extends JFrame {
     public void removePendingTransfers(int sessionId) {
         this.uploadPanel.removePendingTransfers(sessionId);
         this.downloadPanel.removePendingTransfers(sessionId);
+    }
+
+    public void stopPendingTransfersNow(int sessionId) {
+        this.uploadPanel.stopPendingTransfersNow(sessionId);
+        this.downloadPanel.stopPendingTransfersNow(sessionId);
     }
 
     public void openSettings(SettingsPageName page) {

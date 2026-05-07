@@ -229,7 +229,9 @@ public class SshFileSystem implements FileSystem {
     @Override
     public void close() throws Exception {
         this.closed.set(true);
-        this.sftp.close();
+        if (this.sftp != null) {
+            this.sftp.close();
+        }
     }
 
     @Override

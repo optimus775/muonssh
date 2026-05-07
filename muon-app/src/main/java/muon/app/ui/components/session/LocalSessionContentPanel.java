@@ -128,8 +128,11 @@ public class LocalSessionContentPanel extends JPanel implements PageHolder, ISes
         return closed.get();
     }
 
+    @Override
     public void close() {
-        this.closed.set(true);
+        if (!this.closed.compareAndSet(false, true)) {
+            return;
+        }
         try {
             this.terminalHolder.close();
         } catch (Exception e) {

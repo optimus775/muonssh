@@ -93,6 +93,7 @@ public final class App {
         validateMaxKeySize();
 
         mw = new AppWindow();
+        registerShutdownHook();
         externalEditorHandler = new ExternalEditorHandler(mw);
         SwingUtilities.invokeLater(() -> mw.setVisible(true));
 
@@ -124,6 +125,15 @@ public final class App {
         }
     }
 
+    private static void registerShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            AppWindow window = mw;
+            if (window != null) {
+                window.shutdownApplication(false);
+            }
+        }, "Muon-Shutdown-Hook"));
+    }
+
     public static synchronized Settings getGlobalSettings() {
         return CONTEXT.getSettings();
     }
@@ -146,6 +156,12 @@ public final class App {
 
     public static synchronized void removePendingTransfers(int sessionId) {
         mw.removePendingTransfers(sessionId);
+    }
+
+    public static synchronized void stopPendingTransfersNow(int sessionId) {
+        if (mw != null) {
+            mw.stopPendingTransfersNow(sessionId);
+        }
     }
 
     public static synchronized void openSettings(SettingsPageName page) {

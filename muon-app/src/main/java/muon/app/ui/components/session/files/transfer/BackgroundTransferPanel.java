@@ -72,13 +72,19 @@ public class BackgroundTransferPanel extends JPanel {
         }
     }
 
+    public void stopPendingTransfersNow(int sessionId) {
+        stopSession(sessionId);
+    }
+
     private void stopSession(int sessionId) {
-        for (int i = 0; i < this.verticalBox.getComponentCount(); i++) {
-            Component c = this.verticalBox.getComponent(i);
-            if (c instanceof TransferPanelItem) {
-                TransferPanelItem tpi = (TransferPanelItem) c;
-                if (tpi.fileTransfer.getSession().getActiveSessionId() == sessionId) {
-                    tpi.stop();
+        synchronized (this.verticalBox.getTreeLock()) {
+            for (int i = 0; i < this.verticalBox.getComponentCount(); i++) {
+                Component c = this.verticalBox.getComponent(i);
+                if (c instanceof TransferPanelItem) {
+                    TransferPanelItem tpi = (TransferPanelItem) c;
+                    if (tpi.fileTransfer.getSession().getActiveSessionId() == sessionId) {
+                        tpi.stop();
+                    }
                 }
             }
         }
@@ -136,7 +142,16 @@ public class BackgroundTransferPanel extends JPanel {
 
         public void stop() {
             fileTransfer.getFileTransfer().stop();
-            this.handle.cancel(false);
+            if (this.handle != null) {
+                this.handle.cancel(true);
+            }
+            try {
+                if (fileTransfer.getInstance() != null) {
+                    fileTransfer.getInstance().close();
+                }
+            } catch (Exception e) {
+                log.error(e.getMessage(), e);
+            }
         }
 
         @Override

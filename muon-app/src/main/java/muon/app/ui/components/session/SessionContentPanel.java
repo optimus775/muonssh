@@ -43,7 +43,12 @@ import static muon.app.util.ScalingUtil.getScaledMatteBorder;
 @Slf4j
 public class SessionContentPanel extends JPanel implements PageHolder, CachedCredentialProvider, ISessionContentPanel {
     public static final String PAGE_ID = "pageId";
-    public final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
+    private static final long SHUTDOWN_TIMEOUT_SECONDS = 5;
+    public final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "Session-Worker");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Getter
     private final SessionInfo info;
@@ -235,39 +240,82 @@ public class SessionContentPanel extends JPanel implements PageHolder, CachedCre
         return closed.get();
     }
 
+    @Override
     public void close() {
-        this.closed.set(true);
+        close(false);
+    }
+
+    @Override
+    public void closeForShutdown() {
+        close(true);
+    }
+
+    private void close(boolean forShutdown) {
+        if (!this.closed.compareAndSet(false, true)) {
+            return;
+        }
         try {
             this.terminalHolder.close();
         } catch (Exception e) {
             log.error(e.getMessage(), e);
         }
-        App.removePendingTransfers(this.getActiveSessionId());
+        if (forShutdown) {
+            App.stopPendingTransfersNow(this.getActiveSessionId());
+        } else {
+            App.removePendingTransfers(this.getActiveSessionId());
+        }
         if (this.backgroundTransferPool != null) {
             this.backgroundTransferPool.shutdownNow();
         }
+        EXECUTOR.shutdownNow();
 
-        EXECUTOR.submit(() -> {
-            try {
-                this.backgroundTransferPool.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
-            } catch (InterruptedException e1) {
-                log.error(e1.getMessage(), e1);
-            }
-            try {
-                this.remoteSessionInstance.close();
-            } catch (Exception e) {
-                log.error(e.getMessage(), e);
-            }
-            try {
-                this.cachedSessions.forEach(RemoteSessionInstance::close);
-            } catch (Exception e2) {
-                log.error(e2.getMessage(), e2);
-            }
-        });
-        EXECUTOR.shutdown();
+        Runnable cleanup = () -> closeRemoteResources(forShutdown);
+        if (forShutdown) {
+            cleanup.run();
+        } else {
+            Thread cleanupThread = new Thread(cleanup, "Session-Cleanup-" + getActiveSessionId());
+            cleanupThread.setDaemon(true);
+            cleanupThread.start();
+        }
+    }
 
+    private void closeRemoteResources(boolean waitForCleanup) {
+        waitForBackgroundTransfers(waitForCleanup);
+        closeRemoteSession(this.remoteSessionInstance);
+        while (!this.cachedSessions.isEmpty()) {
+            closeRemoteSession(this.cachedSessions.poll());
+        }
         if (this.pfSession != null) {
-            this.pfSession.close();
+            if (waitForCleanup) {
+                this.pfSession.closeAndWait();
+            } else {
+                this.pfSession.close();
+            }
+        }
+    }
+
+    private void waitForBackgroundTransfers(boolean waitForCleanup) {
+        if (!waitForCleanup || this.backgroundTransferPool == null) {
+            return;
+        }
+        try {
+            if (!this.backgroundTransferPool.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                log.warn("Timed out waiting for background transfers to stop");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error(e.getMessage(), e);
+        }
+    }
+
+    private void closeRemoteSession(RemoteSessionInstance session) {
+        if (session == null) {
+            return;
+        }
+        try {
+            session.close();
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
         }
     }
 

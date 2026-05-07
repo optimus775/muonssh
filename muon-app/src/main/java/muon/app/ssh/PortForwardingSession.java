@@ -18,13 +18,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 public class PortForwardingSession {
+    private static final long CLOSE_TIMEOUT_SECONDS = 5;
     private final SSHHandler ssh;
     private final SessionInfo info;
-    private final ExecutorService threadPool = Executors.newCachedThreadPool();
+    private final ExecutorService threadPool = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "Port-Forwarding");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final List<ServerSocket> ssList = new ArrayList<>();
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public PortForwardingSession(SessionInfo info,
                                  CachedCredentialProvider cachedCredentialProvider,
@@ -34,21 +42,44 @@ public class PortForwardingSession {
     }
 
     public void close() {
-        this.threadPool.submit(() -> {
+        close(false);
+    }
+
+    public void closeAndWait() {
+        close(true);
+    }
+
+    private void close(boolean waitForCleanup) {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        closeResources();
+        this.threadPool.shutdownNow();
+        if (waitForCleanup) {
             try {
-                this.ssh.close();
-            } catch (Exception e) {
-                log.error("Failed to close ssh", e);
-            }
-            for (ServerSocket ss : ssList) {
-                try {
-                    ss.close();
-                } catch (Exception e2) {
-                    log.error("Failed to close ss", e2);
+                if (!this.threadPool.awaitTermination(CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    log.warn("Timed out waiting for port forwarding shutdown");
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error(e.getMessage(), e);
             }
-        });
-        this.threadPool.shutdown();
+        }
+    }
+
+    private void closeResources() {
+        try {
+            this.ssh.close();
+        } catch (Exception e) {
+            log.error("Failed to close ssh", e);
+        }
+        for (ServerSocket ss : ssList) {
+            try {
+                ss.close();
+            } catch (Exception e2) {
+                log.error("Failed to close ss", e2);
+            }
+        }
     }
 
     public void start() {
