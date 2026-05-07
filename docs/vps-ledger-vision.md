@@ -25,10 +25,11 @@ Infisical is the first cloud state backend. Local SQLite remains the offline cac
 - `/vps-manager/index/HOSTS_JSON`
 - `/vps-manager/providers/PROVIDERS_JSON`
 - `/vps-manager/hosts/{hostId}/HOST_JSON`
+- `/vps-manager/hosts/{hostId}/SSH_PASSWORD`
 - `/vps-manager/hosts/{hostId}/SSH_PRIVATE_KEY`
 - `/vps-manager/hosts/{hostId}/SSH_PUBLIC_KEY`
 
-Private key sync is disabled by default and must be explicitly enabled in settings and per host.
+SSH passwords are stored as separate secrets, not inside `HOST_JSON`. Private key sync is disabled by default and must be explicitly enabled in settings and per host.
 
 ## Rollout
 

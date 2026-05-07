@@ -79,4 +79,19 @@ public class VpsHostRepositoryTest extends TestCase {
         assertEquals("0.01", loadedInfo.getHourlyRate());
         assertEquals("2026-06-10", loadedInfo.getNextBalanceCheckDate());
     }
+
+    public void testHostJsonDoesNotEmbedSshPassword() throws Exception {
+        SessionInfo info = new SessionInfo();
+        info.setId("host-password");
+        info.setName("password-vps");
+        info.setHost("192.0.2.12");
+        info.setUser("root");
+        info.setPassword("ssh-secret");
+
+        String json = new VpsHostRepository().toHostJson(info);
+
+        assertFalse(json.contains("ssh-secret"));
+        assertFalse(json.contains("\"password\""));
+        assertEquals("SSH_PASSWORD", VpsLedgerServices.SSH_PASSWORD_SECRET);
+    }
 }

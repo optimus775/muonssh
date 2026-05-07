@@ -31,6 +31,7 @@ public final class VpsLedgerServices {
     private static final VikunjaClient VIKUNJA_CLIENT = new VikunjaClient();
     private static final InfisicalClient INFISICAL_CLIENT = new InfisicalClient();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    static final String SSH_PASSWORD_SECRET = "SSH_PASSWORD";
 
     private VpsLedgerServices() {
     }
@@ -131,6 +132,10 @@ public final class VpsLedgerServices {
         for (SessionInfo info : hosts) {
             String hostPath = basePath + "/hosts/" + info.getId();
             INFISICAL_CLIENT.createOrUpdateSecret(settings, token, hostPath, "HOST_JSON", HOST_REPOSITORY.toHostJson(info));
+            String password = getLocalHostPassword(info);
+            if (hasSecretValue(password)) {
+                INFISICAL_CLIENT.createOrUpdateSecret(settings, token, hostPath, SSH_PASSWORD_SECRET, password);
+            }
             if (settings.isInfisicalSyncPrivateKeys() && info.isSyncPrivateKey()) {
                 String privateKey = readFileIfPresent(info.getPrivateKeyFile());
                 if (privateKey != null) {
@@ -155,10 +160,12 @@ public final class VpsLedgerServices {
         }
 
         SavedSessionTree tree = HOST_REPOSITORY.loadTree();
+        populateLocalPasswords(tree);
         Map<String, SessionInfo> localHosts = new HashMap<>();
         collectSessions(tree.getFolder()).forEach(info -> localHosts.put(info.getId(), info));
 
         boolean changed = false;
+        boolean passwordChanged = false;
         for (var node : OBJECT_MAPPER.readTree(indexJson).path("hosts")) {
             String hostId = node.path("id").asText(null);
             if (hostId == null || hostId.isBlank()) {
@@ -170,7 +177,12 @@ public final class VpsLedgerServices {
             }
             SessionInfo remote = HOST_REPOSITORY.fromHostJson(remoteJson);
             SessionInfo local = localHosts.get(remote.getId());
+            String remotePassword = INFISICAL_CLIENT.readSecret(settings, token, basePath + "/hosts/" + hostId, SSH_PASSWORD_SECRET);
             if (local == null) {
+                if (hasSecretValue(remotePassword)) {
+                    remote.setPassword(remotePassword);
+                    passwordChanged = true;
+                }
                 getDefaultFolder(tree.getFolder()).getItems().add(remote);
                 changed = true;
                 continue;
@@ -179,15 +191,27 @@ public final class VpsLedgerServices {
             String localJson = HOST_REPOSITORY.toHostJson(local);
             if (remote.getUpdatedAt() > local.getUpdatedAt()) {
                 HOST_REPOSITORY.recordConflict(remote.getId(), localJson, remoteJson);
+                if (hasSecretValue(remotePassword)) {
+                    remote.setPassword(remotePassword);
+                    passwordChanged = true;
+                } else {
+                    remote.setPassword(local.getPassword());
+                }
                 copySession(remote, local);
                 changed = true;
             } else if (remote.getUpdatedAt() < local.getUpdatedAt()) {
                 HOST_REPOSITORY.recordConflict(remote.getId(), localJson, remoteJson);
+            } else if (hasSecretValue(remotePassword) && !hasSecretValue(local.getPassword())) {
+                local.setPassword(remotePassword);
+                passwordChanged = true;
             }
         }
 
         if (changed) {
             HOST_REPOSITORY.saveTree(tree.getFolder(), tree.getLastSelection());
+        }
+        if (changed || passwordChanged) {
+            PasswordStore.getSharedInstance().savePasswords(tree);
         }
     }
 
@@ -203,6 +227,7 @@ public final class VpsLedgerServices {
         target.setUser(source.getUser());
         target.setLocalFolder(source.getLocalFolder());
         target.setRemoteFolder(source.getRemoteFolder());
+        target.setPassword(source.getPassword());
         target.setPort(source.getPort());
         target.setFavouriteRemoteFolders(source.getFavouriteRemoteFolders());
         target.setFavouriteLocalFolders(source.getFavouriteLocalFolders());
@@ -367,6 +392,29 @@ public final class VpsLedgerServices {
                 && !settings.getInfisicalEnvironment().isBlank()
                 && settings.getInfisicalClientId() != null
                 && !settings.getInfisicalClientId().isBlank();
+    }
+
+    private static String getLocalHostPassword(SessionInfo info) throws Exception {
+        if (info == null) {
+            return null;
+        }
+        if (hasSecretValue(info.getPassword())) {
+            return info.getPassword();
+        }
+        if (info.getId() == null || info.getId().isBlank()) {
+            return null;
+        }
+        return PasswordStore.getSharedInstance().getSecret(info.getId());
+    }
+
+    private static void populateLocalPasswords(SavedSessionTree tree) throws Exception {
+        if (tree != null) {
+            PasswordStore.getSharedInstance().populatePassword(tree);
+        }
+    }
+
+    private static boolean hasSecretValue(String value) {
+        return value != null && !value.isEmpty();
     }
 
     private static List<SessionInfo> collectSessions(SessionFolder folder) {
