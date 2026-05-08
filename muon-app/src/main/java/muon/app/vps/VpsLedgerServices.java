@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
 import muon.app.common.PasswordStore;
+import muon.app.common.secrets.SecretAliases;
 import muon.app.common.settings.Settings;
+import muon.app.ui.components.session.HopEntry;
 import muon.app.ui.components.session.SavedSessionTree;
 import muon.app.ui.components.session.SessionFolder;
 import muon.app.ui.components.session.SessionInfo;
@@ -32,13 +34,15 @@ public final class VpsLedgerServices {
     private static final InfisicalClient INFISICAL_CLIENT = new InfisicalClient();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     static final String SSH_PASSWORD_SECRET = "SSH_PASSWORD";
+    static final String PROXY_PASSWORD_SECRET = "PROXY_PASSWORD";
+    static final String JUMP_PASSWORD_SECRET = "PASSWORD";
 
     private VpsLedgerServices() {
     }
 
     public static void syncVikunjaPaymentsAsync(SessionFolder folder, String lastSelectionPath) {
         Settings settings = App.getGlobalSettings();
-        if (!isVikunjaConfigured(settings) || !settings.isUsingMasterPassword()) {
+        if (!isVikunjaConfigured(settings)) {
             return;
         }
         List<SessionInfo> sessions = collectSessions(folder);
@@ -73,10 +77,6 @@ public final class VpsLedgerServices {
 
     public static void syncVikunjaNow(Component parent, SessionInfo info) {
         Settings settings = App.getGlobalSettings();
-        if (!settings.isUsingMasterPassword()) {
-            showMessage(parent, "Enable master password before using VPS Ledger integration API keys.", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
         if (!isVikunjaConfigured(settings)) {
             showMessage(parent, "Configure Vikunja base URL, project ID and API token first.", JOptionPane.WARNING_MESSAGE);
             return;
@@ -104,31 +104,9 @@ public final class VpsLedgerServices {
     }
 
     public static void syncInfisicalNow(Component parent) {
-        Settings settings = App.getGlobalSettings();
-        if (!settings.isUsingMasterPassword()) {
-            showMessage(parent, "Enable master password before using VPS Ledger integration API keys.", JOptionPane.WARNING_MESSAGE);
-            return;
+        if (App.getInfisicalSyncService() != null) {
+            App.getInfisicalSyncService().requestManualRefresh();
         }
-        if (!isInfisicalConfigured(settings)) {
-            showMessage(parent, "Configure Infisical project, environment, client ID and client secret first.", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        App.getCONTEXT().getExecutor().submit(() -> {
-            try {
-                String clientSecret = PasswordStore.getSharedInstance().getSecret(InfisicalClient.CLIENT_SECRET_ALIAS);
-                if (clientSecret == null || clientSecret.isBlank()) {
-                    throw new IllegalStateException("Infisical client secret is empty");
-                }
-                String token = INFISICAL_CLIENT.login(settings, clientSecret);
-                mergeRemoteInfisicalState(settings, token);
-                List<SessionInfo> hosts = HOST_REPOSITORY.listHosts();
-                pushInfisicalState(settings, token, hosts);
-                showMessage(parent, "Infisical sync completed for " + hosts.size() + " hosts.", JOptionPane.INFORMATION_MESSAGE);
-            } catch (Exception e) {
-                log.error("Unable to sync Infisical state", e);
-                showMessage(parent, "Unable to sync Infisical state: " + e.getMessage(), JOptionPane.ERROR_MESSAGE);
-            }
-        });
     }
 
     private static void pushInfisicalState(Settings settings, String token, List<SessionInfo> hosts) throws Exception {
@@ -143,6 +121,21 @@ public final class VpsLedgerServices {
             String password = getLocalHostPassword(info);
             if (hasSecretValue(password)) {
                 INFISICAL_CLIENT.createOrUpdateSecret(settings, token, hostPath, SSH_PASSWORD_SECRET, password);
+            }
+            String proxyPassword = getLocalProxyPassword(info);
+            if (hasSecretValue(proxyPassword)) {
+                INFISICAL_CLIENT.createOrUpdateSecret(settings, token, hostPath, PROXY_PASSWORD_SECRET, proxyPassword);
+            }
+            for (HopEntry hop : info.getJumpHosts()) {
+                if (hop.getId() == null || hop.getId().isBlank()) {
+                    continue;
+                }
+                String jumpPassword = getLocalJumpPassword(info, hop);
+                if (hasSecretValue(jumpPassword)) {
+                    INFISICAL_CLIENT.createOrUpdateSecret(settings, token,
+                                                          hostPath + "/jump-hosts/" + hop.getId(),
+                                                          JUMP_PASSWORD_SECRET, jumpPassword);
+                }
             }
             if (settings.isInfisicalSyncPrivateKeys() && info.isSyncPrivateKey()) {
                 String privateKey = readFileIfPresent(info.getPrivateKeyFile());
@@ -186,9 +179,15 @@ public final class VpsLedgerServices {
             SessionInfo remote = HOST_REPOSITORY.fromHostJson(remoteJson);
             SessionInfo local = localHosts.get(remote.getId());
             String remotePassword = INFISICAL_CLIENT.readSecret(settings, token, basePath + "/hosts/" + hostId, SSH_PASSWORD_SECRET);
+            String remoteProxyPassword = INFISICAL_CLIENT.readSecret(settings, token, basePath + "/hosts/" + hostId, PROXY_PASSWORD_SECRET);
+            populateRemoteJumpPasswords(settings, token, basePath, hostId, remote);
             if (local == null) {
                 if (hasSecretValue(remotePassword)) {
                     remote.setPassword(remotePassword);
+                    passwordChanged = true;
+                }
+                if (hasSecretValue(remoteProxyPassword)) {
+                    remote.setProxyPassword(remoteProxyPassword);
                     passwordChanged = true;
                 }
                 getDefaultFolder(tree.getFolder()).getItems().add(remote);
@@ -205,13 +204,29 @@ public final class VpsLedgerServices {
                 } else {
                     remote.setPassword(local.getPassword());
                 }
+                if (hasSecretValue(remoteProxyPassword)) {
+                    remote.setProxyPassword(remoteProxyPassword);
+                    passwordChanged = true;
+                } else {
+                    remote.setProxyPassword(local.getProxyPassword());
+                }
+                preserveMissingJumpPasswords(remote, local);
                 copySession(remote, local);
                 changed = true;
             } else if (remote.getUpdatedAt() < local.getUpdatedAt()) {
                 HOST_REPOSITORY.recordConflict(remote.getId(), localJson, remoteJson);
-            } else if (hasSecretValue(remotePassword) && !hasSecretValue(local.getPassword())) {
-                local.setPassword(remotePassword);
-                passwordChanged = true;
+            } else {
+                if (hasSecretValue(remotePassword) && !hasSecretValue(local.getPassword())) {
+                    local.setPassword(remotePassword);
+                    passwordChanged = true;
+                }
+                if (hasSecretValue(remoteProxyPassword) && !hasSecretValue(local.getProxyPassword())) {
+                    local.setProxyPassword(remoteProxyPassword);
+                    passwordChanged = true;
+                }
+                if (applyMissingJumpPasswords(remote, local)) {
+                    passwordChanged = true;
+                }
             }
         }
 
@@ -412,7 +427,79 @@ public final class VpsLedgerServices {
         if (info.getId() == null || info.getId().isBlank()) {
             return null;
         }
-        return PasswordStore.getSharedInstance().getSecret(info.getId());
+        return PasswordStore.getSharedInstance().getSecret(SecretAliases.sshPassword(info.getId()));
+    }
+
+    private static String getLocalProxyPassword(SessionInfo info) throws Exception {
+        if (info == null) {
+            return null;
+        }
+        if (hasSecretValue(info.getProxyPassword())) {
+            return info.getProxyPassword();
+        }
+        if (info.getId() == null || info.getId().isBlank()) {
+            return null;
+        }
+        return PasswordStore.getSharedInstance().getSecret(SecretAliases.proxyPassword(info.getId()));
+    }
+
+    private static String getLocalJumpPassword(SessionInfo info, HopEntry hop) throws Exception {
+        if (info == null || hop == null) {
+            return null;
+        }
+        if (hasSecretValue(hop.getPassword())) {
+            return hop.getPassword();
+        }
+        if (info.getId() == null || info.getId().isBlank() || hop.getId() == null || hop.getId().isBlank()) {
+            return null;
+        }
+        return PasswordStore.getSharedInstance().getSecret(SecretAliases.jumpPassword(info.getId(), hop.getId()));
+    }
+
+    private static void populateRemoteJumpPasswords(Settings settings, String token, String basePath,
+                                                    String hostId, SessionInfo remote) throws Exception {
+        for (HopEntry hop : remote.getJumpHosts()) {
+            if (hop.getId() == null || hop.getId().isBlank()) {
+                continue;
+            }
+            String remoteJumpPassword = INFISICAL_CLIENT.readSecret(settings, token,
+                                                                    basePath + "/hosts/" + hostId + "/jump-hosts/" + hop.getId(),
+                                                                    JUMP_PASSWORD_SECRET);
+            if (hasSecretValue(remoteJumpPassword)) {
+                hop.setPassword(remoteJumpPassword);
+            }
+        }
+    }
+
+    private static void preserveMissingJumpPasswords(SessionInfo remote, SessionInfo local) {
+        Map<String, String> localPasswords = new HashMap<>();
+        for (HopEntry hop : local.getJumpHosts()) {
+            if (hop.getId() != null && hasSecretValue(hop.getPassword())) {
+                localPasswords.put(hop.getId(), hop.getPassword());
+            }
+        }
+        for (HopEntry hop : remote.getJumpHosts()) {
+            if (!hasSecretValue(hop.getPassword()) && hop.getId() != null) {
+                hop.setPassword(localPasswords.get(hop.getId()));
+            }
+        }
+    }
+
+    private static boolean applyMissingJumpPasswords(SessionInfo remote, SessionInfo local) {
+        Map<String, String> remotePasswords = new HashMap<>();
+        for (HopEntry hop : remote.getJumpHosts()) {
+            if (hop.getId() != null && hasSecretValue(hop.getPassword())) {
+                remotePasswords.put(hop.getId(), hop.getPassword());
+            }
+        }
+        boolean changed = false;
+        for (HopEntry hop : local.getJumpHosts()) {
+            if (!hasSecretValue(hop.getPassword()) && hop.getId() != null && remotePasswords.containsKey(hop.getId())) {
+                hop.setPassword(remotePasswords.get(hop.getId()));
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     private static void populateLocalPasswords(SavedSessionTree tree) throws Exception {

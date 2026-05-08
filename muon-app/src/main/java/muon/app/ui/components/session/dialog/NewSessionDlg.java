@@ -63,6 +63,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         this.initialSelectionId = initialSession == null ? null : initialSession.getId();
         this.disconnectAction = disconnectAction;
         createUI();
+        if (App.getInfisicalSyncService() != null) {
+            App.getInfisicalSyncService().editorOpened();
+        }
     }
 
     private void createUI() {
@@ -79,6 +82,13 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             public void windowClosing(WindowEvent e) {
                 if (confirmClose()) {
                     dispose();
+                }
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {
+                if (App.getInfisicalSyncService() != null) {
+                    App.getInfisicalSyncService().editorClosed();
                 }
             }
         });

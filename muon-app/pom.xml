@@ -7,7 +7,7 @@
     <parent>
         <groupId>muon</groupId>
         <artifactId>muon</artifactId>
-        <version>3.18.2</version>
+        <version>3.18.3</version>
     </parent>
     <groupId>muon-app</groupId>
     <artifactId>muon-app</artifactId>
@@ -81,6 +81,18 @@
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.49.1.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>de.swiesend</groupId>
+            <artifactId>secret-service</artifactId>
+            <version>1.7.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- https://mvnrepository.com/artifact/com.fifesoft/rstaui -->

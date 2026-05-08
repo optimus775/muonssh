@@ -3,6 +3,7 @@ package muon.app.vps;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import muon.app.common.secrets.SecretAliases;
 import muon.app.common.settings.Settings;
 
 import java.io.IOException;
@@ -12,10 +13,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 public class InfisicalClient {
 
-    public static final String CLIENT_SECRET_ALIAS = "vps-ledger.infisical.client-secret";
+    public static final String CLIENT_SECRET_ALIAS = SecretAliases.INFISICAL_CLIENT_SECRET;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -52,9 +55,10 @@ public class InfisicalClient {
 
     public void createOrUpdateSecret(Settings settings, String accessToken, String secretPath, String secretName, String secretValue)
             throws IOException, InterruptedException {
-        HttpResponse<String> updateResponse = sendSecretRequest(settings, accessToken, secretPath, secretName, secretValue, "PATCH");
+        ensureFolderPathExists(settings, accessToken, secretPath);
+        HttpResponse<String> updateResponse = sendSecretRequestV4(settings, accessToken, secretPath, secretName, secretValue, "PATCH");
         if (updateResponse.statusCode() == 404) {
-            HttpResponse<String> createResponse = sendSecretRequest(settings, accessToken, secretPath, secretName, secretValue, "POST");
+            HttpResponse<String> createResponse = sendSecretRequestV4(settings, accessToken, secretPath, secretName, secretValue, "POST");
             ensureSuccess(createResponse, "Infisical create secret failed");
             return;
         }
@@ -74,6 +78,9 @@ public class InfisicalClient {
                                                                .GET()
                                                                .build(),
                                                        HttpResponse.BodyHandlers.ofString());
+        if (isRouteNotFound(response)) {
+            throw new UnsupportedApiVersionException("Infisical latest secrets API is unavailable on this server");
+        }
         if (response.statusCode() == 404) {
             return null;
         }
@@ -82,8 +89,72 @@ public class InfisicalClient {
         return secretValue == null || secretValue.isNull() ? null : secretValue.asText();
     }
 
-    private HttpResponse<String> sendSecretRequest(Settings settings, String accessToken, String secretPath,
-                                                   String secretName, String secretValue, String method)
+    private void ensureFolderPathExists(Settings settings, String accessToken, String secretPath) throws IOException, InterruptedException {
+        String normalizedPath = normalizePath(secretPath);
+        if ("/".equals(normalizedPath)) {
+            return;
+        }
+
+        String currentPath = "/";
+        for (String segment : splitPath(normalizedPath)) {
+            if (!folderExists(settings, accessToken, currentPath, segment)) {
+                createFolder(settings, accessToken, currentPath, segment);
+            }
+            currentPath = joinPath(currentPath, segment);
+        }
+    }
+
+    private boolean folderExists(Settings settings, String accessToken, String parentPath, String folderName)
+            throws IOException, InterruptedException {
+        URI uri = URI.create(trimTrailingSlash(settings.getInfisicalBaseUrl())
+                + "/api/v2/folders"
+                + "?projectId=" + encode(settings.getInfisicalProjectId())
+                + "&environment=" + encode(settings.getInfisicalEnvironment())
+                + "&path=" + encode(parentPath)
+                + "&recursive=false");
+        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(uri)
+                                                               .header("Authorization", "Bearer " + accessToken)
+                                                               .GET()
+                                                               .build(),
+                                                       HttpResponse.BodyHandlers.ofString());
+        ensureSuccess(response, "Infisical list folders failed");
+
+        JsonNode folders = objectMapper.readTree(response.body()).path("folders");
+        if (!folders.isArray()) {
+            return false;
+        }
+        String expectedPath = joinPath(parentPath, folderName);
+        for (JsonNode folder : folders) {
+            if (folderName.equals(folder.path("name").asText())) {
+                return true;
+            }
+            if (expectedPath.equals(normalizeListedPath(folder.path("relativePath").asText(null)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void createFolder(Settings settings, String accessToken, String parentPath, String folderName)
+            throws IOException, InterruptedException {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("projectId", settings.getInfisicalProjectId());
+        body.put("environment", settings.getInfisicalEnvironment());
+        body.put("name", folderName);
+        body.put("path", normalizePath(parentPath));
+
+        URI uri = URI.create(trimTrailingSlash(settings.getInfisicalBaseUrl()) + "/api/v2/folders");
+        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(uri)
+                                                               .header("Authorization", "Bearer " + accessToken)
+                                                               .header("Content-Type", "application/json")
+                                                               .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                                                               .build(),
+                                                       HttpResponse.BodyHandlers.ofString());
+        ensureSuccess(response, "Infisical create folder failed");
+    }
+
+    private HttpResponse<String> sendSecretRequestV4(Settings settings, String accessToken, String secretPath,
+                                                     String secretName, String secretValue, String method)
             throws IOException, InterruptedException {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("projectId", settings.getInfisicalProjectId());
@@ -105,8 +176,52 @@ public class InfisicalClient {
 
     private void ensureSuccess(HttpResponse<String> response, String message) throws IOException {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            if (isRouteNotFound(response)) {
+                throw new UnsupportedApiVersionException(message + " HTTP " + response.statusCode() + ": " + response.body());
+            }
             throw new IOException(message + " HTTP " + response.statusCode() + ": " + response.body());
         }
+    }
+
+    private boolean isRouteNotFound(HttpResponse<String> response) {
+        if (response.statusCode() != 404) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode typeNode = root.get("type");
+            return typeNode != null && "route_not_found".equals(typeNode.asText());
+        } catch (Exception ignored) {
+            return response.body() != null && response.body().contains("\"type\":\"route_not_found\"");
+        }
+    }
+
+    private List<String> splitPath(String path) {
+        List<String> segments = new ArrayList<>();
+        for (String segment : path.split("/")) {
+            if (segment != null && !segment.isBlank()) {
+                segments.add(segment);
+            }
+        }
+        return segments;
+    }
+
+    private String joinPath(String parentPath, String segment) {
+        String normalizedParent = normalizePath(parentPath);
+        if ("/".equals(normalizedParent)) {
+            return "/" + segment;
+        }
+        return normalizedParent + "/" + segment;
+    }
+
+    private String normalizeListedPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "/";
+        }
+        if (path.startsWith("/")) {
+            return path;
+        }
+        return "/" + path;
     }
 
     private String encode(String value) {
@@ -128,5 +243,12 @@ public class InfisicalClient {
             value = value.substring(0, value.length() - 1);
         }
         return value;
+    }
+
+    public static class UnsupportedApiVersionException extends IOException {
+
+        public UnsupportedApiVersionException(String message) {
+            super(message);
+        }
     }
 }

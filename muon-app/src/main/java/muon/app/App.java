@@ -14,6 +14,7 @@ import muon.app.ui.components.session.files.transfer.BackgroundFileTransfer;
 import muon.app.ui.components.settings.SettingsPageName;
 import muon.app.util.PlatformUtils;
 import muon.app.util.enums.ConflictAction;
+import muon.app.vps.InfisicalSyncService;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import javax.swing.*;
@@ -31,6 +32,8 @@ public final class App {
 
     @Getter
     private static ExternalEditorHandler externalEditorHandler;
+    @Getter
+    private static InfisicalSyncService infisicalSyncService;
     private static AppWindow mw;
 
     static {
@@ -93,9 +96,11 @@ public final class App {
         validateMaxKeySize();
 
         mw = new AppWindow();
+        infisicalSyncService = new InfisicalSyncService();
         registerShutdownHook();
         externalEditorHandler = new ExternalEditorHandler(mw);
         SwingUtilities.invokeLater(() -> mw.setVisible(true));
+        infisicalSyncService.start();
 
         if (App.getGlobalSettings().isStartWithTerminal()) {
             mw.createLocalSessionPanel();

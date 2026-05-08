@@ -15,7 +15,6 @@ import muon.app.util.enums.ConflictAction;
 import muon.app.util.enums.Language;
 import muon.app.vps.InfisicalClient;
 import muon.app.vps.VikunjaClient;
-import muon.app.vps.VpsLedgerServices;
 
 import javax.swing.*;
 import javax.swing.border.CompoundBorder;
@@ -23,6 +22,7 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.text.NumberFormatter;
 import java.awt.*;
 import java.io.File;
+import java.text.ParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -106,7 +106,6 @@ public class SettingsDialog extends JDialog {
     private JTextField txtInfisicalClientId;
     private JTextField txtInfisicalOrganizationSlug;
     private JPasswordField txtInfisicalClientSecret;
-    private JCheckBox chkInfisicalSyncPrivateKeys;
     private boolean integrationSecretsLoaded;
 
     private Color[] getIndexColors() {
@@ -563,6 +562,9 @@ public class SettingsDialog extends JDialog {
     }
 
     private void applySettings() {
+        if (!commitNumericFields()) {
+            return;
+        }
         if (!saveIntegrationSecrets()) {
             return;
         }
@@ -571,9 +573,9 @@ public class SettingsDialog extends JDialog {
         settings.setTerminalBell(this.chkAudibleBell.isSelected());
         settings.setPuttyLikeCopyPaste(this.chkPuttyLikeCopyPaste.isSelected());
         settings.setConfirmBeforeTerminalClosing(this.chkConfirmBeforeTerminalClosing.isSelected());
-        settings.setTermWidth((int) this.spTermWidth.getModel().getValue());
-        settings.setTermHeight((int) this.spTermHeight.getModel().getValue());
-        settings.setTerminalFontSize((int) this.spFontSize.getModel().getValue());
+        settings.setTermWidth(spinnerIntValue(spTermWidth));
+        settings.setTermHeight(spinnerIntValue(spTermHeight));
+        settings.setTerminalFontSize(spinnerIntValue(spFontSize));
         settings.setTerminalFontName(Objects.requireNonNull(this.cmbFonts.getSelectedItem()).toString());
         settings.setTerminalType(Objects.requireNonNull(this.cmbTermType.getSelectedItem()).toString());
         settings.setLanguage((Language) this.cmbLanguage.getSelectedItem());
@@ -622,18 +624,18 @@ public class SettingsDialog extends JDialog {
         settings.setStartMaximized(rbStartMaximized.isSelected());
         settings.setRememberLastSizeAndPosition(rbRememberLastSizeAndPosition.isSelected());
 
-        settings.setConnectionTimeout((Integer) spConnectionTimeout.getValue());
+        settings.setConnectionTimeout(spinnerIntValue(spConnectionTimeout));
         settings.setConnectionKeepAlive(spConnectionKeepAlive.isSelected());
-        settings.setLogViewerFont((Integer) spLogFontSize.getValue());
-        settings.setLogViewerLinesPerPage((Integer) spLogLinesPerPage.getValue());
+        settings.setLogViewerFont(spinnerIntValue(spLogFontSize));
+        settings.setLogViewerLinesPerPage(spinnerIntValue(spLogLinesPerPage));
         settings.setLogViewerUseWordWrap(chkLogWrap.isSelected());
 
-        settings.setSysloadRefreshInterval((Integer) spSysLoadInterval.getValue());
+        settings.setSysloadRefreshInterval(spinnerIntValue(spSysLoadInterval));
 
         settings.setEditors(editorModel.getEntries());
 
         settings.setManualScaling(chkUseManualScaling.isSelected());
-        settings.setUiScaling((double) spScaleValue.getValue());
+        settings.setUiScaling(spinnerDoubleValue(spScaleValue));
 
         settings.setConflictAction((ConflictAction) cmbConflictAction.getSelectedItem());
 
@@ -647,8 +649,8 @@ public class SettingsDialog extends JDialog {
 
     private void applyVpsLedgerSettings(Settings settings) {
         settings.setVikunjaBaseUrl(txtVikunjaBaseUrl.getText().trim());
-        settings.setVikunjaProjectId((Long) spVikunjaProjectId.getValue());
-        settings.setVikunjaReminderOffsetDays((Integer) spVikunjaReminderDays.getValue());
+        settings.setVikunjaProjectId(spinnerLongValue(spVikunjaProjectId));
+        settings.setVikunjaReminderOffsetDays(spinnerIntValue(spVikunjaReminderDays));
 
         settings.setInfisicalBaseUrl(txtInfisicalBaseUrl.getText().trim());
         settings.setInfisicalProjectId(txtInfisicalProjectId.getText().trim());
@@ -656,10 +658,12 @@ public class SettingsDialog extends JDialog {
         settings.setInfisicalSecretBasePath(txtInfisicalSecretBasePath.getText().trim());
         settings.setInfisicalClientId(txtInfisicalClientId.getText().trim());
         settings.setInfisicalOrganizationSlug(txtInfisicalOrganizationSlug.getText().trim());
-        settings.setInfisicalSyncPrivateKeys(chkInfisicalSyncPrivateKeys.isSelected());
     }
 
     private boolean saveVpsLedgerSettings() {
+        if (!commitNumericFields()) {
+            return false;
+        }
         if (!saveIntegrationSecrets()) {
             return false;
         }
@@ -668,19 +672,51 @@ public class SettingsDialog extends JDialog {
         return true;
     }
 
+    private boolean commitNumericFields() {
+        for (JSpinner spinner : new JSpinner[]{
+                spTermWidth, spTermHeight, spFontSize,
+                spConnectionTimeout, spLogFontSize, spLogLinesPerPage,
+                spSysLoadInterval, spScaleValue,
+                spVikunjaProjectId, spVikunjaReminderDays
+        }) {
+            if (!commitSpinner(spinner)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean commitSpinner(JSpinner spinner) {
+        try {
+            spinner.commitEdit();
+            return true;
+        } catch (ParseException e) {
+            JOptionPane.showMessageDialog(this,
+                    App.getCONTEXT().getBundle().getString("error_operation"),
+                    App.getCONTEXT().getBundle().getString("error"),
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    private int spinnerIntValue(JSpinner spinner) {
+        return ((Number) spinner.getValue()).intValue();
+    }
+
+    private long spinnerLongValue(JSpinner spinner) {
+        return ((Number) spinner.getValue()).longValue();
+    }
+
+    private double spinnerDoubleValue(JSpinner spinner) {
+        return ((Number) spinner.getValue()).doubleValue();
+    }
+
     private boolean saveIntegrationSecrets() {
         try {
-            if (!validateProtectedVpsLedgerStorage()) {
-                return false;
-            }
-
             PasswordStore store = PasswordStore.getSharedInstance();
-            if (!unlockPasswordStore(store)) {
-                return false;
-            }
             if (!integrationSecretsLoaded && !hasVpsLedgerSecretFieldValues()) {
                 JOptionPane.showMessageDialog(this,
-                        "Unlock the password store before saving VPS Ledger settings.",
+                        "Load stored secrets before saving VPS Ledger settings.",
                         App.getCONTEXT().getBundle().getString("error"),
                         JOptionPane.ERROR_MESSAGE);
                 return false;
@@ -694,19 +730,6 @@ public class SettingsDialog extends JDialog {
             JOptionPane.showMessageDialog(this, App.getCONTEXT().getBundle().getString("error_operation"), App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
             return false;
         }
-    }
-
-    private boolean validateProtectedVpsLedgerStorage() {
-        if (!hasVpsLedgerSecurityMaterial() || App.getGlobalSettings().isUsingMasterPassword()) {
-            return true;
-        }
-        showVpsLedgerMasterPasswordRequired();
-        return false;
-    }
-
-    private boolean hasVpsLedgerSecurityMaterial() {
-        return hasVpsLedgerSecretFieldValues()
-                || chkInfisicalSyncPrivateKeys.isSelected();
     }
 
     private boolean hasVpsLedgerSecretFieldValues() {
@@ -724,14 +747,6 @@ public class SettingsDialog extends JDialog {
         return false;
     }
 
-    private void showVpsLedgerMasterPasswordRequired() {
-        navList.setSelectedValue(VPS_LEDGER_PAGE, true);
-        JOptionPane.showMessageDialog(this,
-                "Enable master password before saving VPS Ledger API keys or allowing SSH key sync to Infisical.",
-                App.getCONTEXT().getBundle().getString("error"),
-                JOptionPane.ERROR_MESSAGE);
-    }
-
     private boolean unlockPasswordStore(PasswordStore store) throws Exception {
         if (store.isUnlocked()) {
             return true;
@@ -741,13 +756,6 @@ public class SettingsDialog extends JDialog {
         }
         store.unlockStore(new char[0]);
         return true;
-    }
-
-    private boolean hasStoredVpsLedgerSecrets(PasswordStore store) {
-        String vikunjaToken = store.getSecret(VikunjaClient.API_TOKEN_ALIAS);
-        String infisicalClientSecret = store.getSecret(InfisicalClient.CLIENT_SECRET_ALIAS);
-        return (vikunjaToken != null && !vikunjaToken.isBlank())
-                || (infisicalClientSecret != null && !infisicalClientSecret.isBlank());
     }
 
     public boolean showDialog(JFrame window, SettingsPageName page) {
@@ -859,7 +867,6 @@ public class SettingsDialog extends JDialog {
         this.txtInfisicalSecretBasePath.setText(settings.getInfisicalSecretBasePath());
         this.txtInfisicalClientId.setText(settings.getInfisicalClientId());
         this.txtInfisicalOrganizationSlug.setText(settings.getInfisicalOrganizationSlug());
-        this.chkInfisicalSyncPrivateKeys.setSelected(settings.isInfisicalSyncPrivateKeys());
         loadIntegrationSecrets();
 
         checkRbScreenSelection();
@@ -1038,12 +1045,13 @@ public class SettingsDialog extends JDialog {
         txtInfisicalClientId = new SkinnedTextField(30);
         txtInfisicalOrganizationSlug = new SkinnedTextField(20);
         txtInfisicalClientSecret = new JPasswordField(30);
-        chkInfisicalSyncPrivateKeys = new JCheckBox("Allow SSH key sync to Infisical");
 
-        JButton btnSyncInfisical = new JButton("Sync Infisical now");
+        JButton btnSyncInfisical = new JButton("Refresh sync now");
         btnSyncInfisical.addActionListener(e -> {
             if (saveVpsLedgerSettings()) {
-                VpsLedgerServices.syncInfisicalNow(this);
+                if (App.getInfisicalSyncService() != null) {
+                    App.getInfisicalSyncService().requestManualRefresh();
+                }
             }
         });
 
@@ -1073,9 +1081,6 @@ public class SettingsDialog extends JDialog {
         vbox.add(createSettingsRow("Client secret", txtInfisicalClientSecret));
         vbox.add(Box.createVerticalStrut(8));
         vbox.add(createSettingsRow("Organization slug", txtInfisicalOrganizationSlug));
-        vbox.add(Box.createVerticalStrut(8));
-        chkInfisicalSyncPrivateKeys.setAlignmentX(Box.LEFT_ALIGNMENT);
-        vbox.add(chkInfisicalSyncPrivateKeys);
         vbox.add(Box.createVerticalStrut(12));
         btnSyncInfisical.setAlignmentX(Box.LEFT_ALIGNMENT);
         vbox.add(btnSyncInfisical);
@@ -1125,14 +1130,7 @@ public class SettingsDialog extends JDialog {
                     chkUseMasterPassword.setSelected(true);
                     throw new IllegalArgumentException(App.getCONTEXT().getBundle().getString(CHANGE_PASSWORD_FAILED));
                 }
-                PasswordStore store = PasswordStore.getSharedInstance();
-                if (hasVpsLedgerSecurityMaterial() || hasStoredVpsLedgerSecrets(store)) {
-                    chkUseMasterPassword.setSelected(true);
-                    btnChangeMasterPassword.setEnabled(true);
-                    showVpsLedgerMasterPasswordRequired();
-                    return;
-                }
-                store.changeStorePassword(new char[0]);
+                PasswordStore.getSharedInstance().changeStorePassword(new char[0]);
                 updateSettingsAndNotify(false, "password_unprotected");
                 return;
             }

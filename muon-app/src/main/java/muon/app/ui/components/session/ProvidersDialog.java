@@ -44,6 +44,9 @@ public class ProvidersDialog extends JDialog {
         super(owner, "Providers", ModalityType.APPLICATION_MODAL);
         createUI();
         reloadProviders();
+        if (App.getInfisicalSyncService() != null) {
+            App.getInfisicalSyncService().editorOpened();
+        }
     }
 
     private void createUI() {
@@ -55,6 +58,13 @@ public class ProvidersDialog extends JDialog {
             @Override
             public void windowClosing(WindowEvent e) {
                 closeDialog();
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {
+                if (App.getInfisicalSyncService() != null) {
+                    App.getInfisicalSyncService().editorClosed();
+                }
             }
         });
 
@@ -234,6 +244,9 @@ public class ProvidersDialog extends JDialog {
         }
         try {
             repository.deleteProvider(current.getId());
+            if (App.getInfisicalSyncService() != null) {
+                App.getInfisicalSyncService().notifyLocalStateChanged();
+            }
             reloadProviders();
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, e.getMessage(), App.getCONTEXT().getBundle().getString("error"),
@@ -330,6 +343,9 @@ public class ProvidersDialog extends JDialog {
         try {
             current = repository.upsertProvider(provider);
             clearDirty();
+            if (App.getInfisicalSyncService() != null) {
+                App.getInfisicalSyncService().notifyLocalStateChanged();
+            }
             return true;
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, e.getMessage(), App.getCONTEXT().getBundle().getString("error"),

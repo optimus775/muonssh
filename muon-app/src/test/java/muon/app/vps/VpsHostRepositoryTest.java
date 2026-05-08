@@ -2,6 +2,7 @@ package muon.app.vps;
 
 import junit.framework.TestCase;
 import muon.app.App;
+import muon.app.ui.components.session.HopEntry;
 import muon.app.ui.components.session.SavedSessionTree;
 import muon.app.ui.components.session.SessionFolder;
 import muon.app.ui.components.session.SessionInfo;
@@ -87,11 +88,41 @@ public class VpsHostRepositoryTest extends TestCase {
         info.setHost("192.0.2.12");
         info.setUser("root");
         info.setPassword("ssh-secret");
+        info.setProxyPassword("proxy-secret");
+        HopEntry hop = new HopEntry();
+        hop.setId("hop-1");
+        hop.setHost("192.0.2.13");
+        hop.setUser("jump");
+        hop.setPassword("jump-secret");
+        info.getJumpHosts().add(hop);
 
         String json = new VpsHostRepository().toHostJson(info);
 
         assertFalse(json.contains("ssh-secret"));
+        assertFalse(json.contains("proxy-secret"));
+        assertFalse(json.contains("jump-secret"));
         assertFalse(json.contains("\"password\""));
+        assertFalse(json.contains("\"proxyPassword\""));
         assertEquals("SSH_PASSWORD", VpsLedgerServices.SSH_PASSWORD_SECRET);
+        assertEquals("PROXY_PASSWORD", VpsLedgerServices.PROXY_PASSWORD_SECRET);
+        assertEquals("PASSWORD", VpsLedgerServices.JUMP_PASSWORD_SECRET);
+    }
+
+    public void testHostJsonCanReadLegacySecretFields() throws Exception {
+        String json = "{"
+                + "\"id\":\"legacy-host\","
+                + "\"name\":\"legacy\","
+                + "\"host\":\"192.0.2.14\","
+                + "\"user\":\"root\","
+                + "\"password\":\"ssh-secret\","
+                + "\"proxyPassword\":\"proxy-secret\","
+                + "\"jumpHosts\":[{\"id\":\"hop-1\",\"host\":\"192.0.2.15\",\"user\":\"jump\",\"password\":\"jump-secret\"}]"
+                + "}";
+
+        SessionInfo info = new VpsHostRepository().fromHostJson(json);
+
+        assertEquals("ssh-secret", info.getPassword());
+        assertEquals("proxy-secret", info.getProxyPassword());
+        assertEquals("jump-secret", info.getJumpHosts().get(0).getPassword());
     }
 }

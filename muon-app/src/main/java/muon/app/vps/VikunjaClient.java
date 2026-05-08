@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import muon.app.common.secrets.SecretAliases;
 import muon.app.common.settings.Settings;
 import muon.app.ui.components.session.SessionInfo;
 
@@ -22,7 +23,7 @@ import java.util.Objects;
 
 public class VikunjaClient {
 
-    public static final String API_TOKEN_ALIAS = "vps-ledger.vikunja.api-token";
+    public static final String API_TOKEN_ALIAS = SecretAliases.VIKUNJA_API_TOKEN;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;

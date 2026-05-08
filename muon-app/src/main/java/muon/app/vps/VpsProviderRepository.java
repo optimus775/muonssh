@@ -148,6 +148,26 @@ public class VpsProviderRepository {
         }
     }
 
+    synchronized void replaceProviders(Connection connection, List<ProviderRecord> providers) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM providers")) {
+            statement.executeUpdate();
+        }
+        if (providers == null) {
+            return;
+        }
+        for (ProviderRecord provider : providers) {
+            if (provider == null || provider.getName() == null || provider.getName().trim().isEmpty()) {
+                continue;
+            }
+            if (provider.getId() == null || provider.getId().isBlank()) {
+                provider.setId(UUID.randomUUID().toString());
+            }
+            provider.setName(provider.getName().trim());
+            provider.setDeleted(false);
+            upsertProvider(connection, provider);
+        }
+    }
+
     synchronized String createProviderFromHost(Connection connection, String providerName, String providerUrl,
                                                String accountId) throws Exception {
         if (providerName == null || providerName.isBlank()) {

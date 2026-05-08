@@ -77,6 +77,16 @@ public class SessionInfo extends NamedItem implements Serializable {
         this.password = password;
     }
 
+    @JsonIgnore
+    public String getProxyPassword() {
+        return proxyPassword;
+    }
+
+    @JsonProperty
+    public void setProxyPassword(String proxyPassword) {
+        this.proxyPassword = proxyPassword;
+    }
+
     public SessionInfo copy() {
         SessionInfo info = new SessionInfo();
         info.setId(UUID.randomUUID().toString());

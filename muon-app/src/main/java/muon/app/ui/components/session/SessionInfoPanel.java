@@ -82,8 +82,6 @@ public class SessionInfoPanel extends JPanel {
     private JTextField inpTags;
     private SkinnedTextArea inpDescription;
     private SkinnedTextArea inpExternalRefs;
-    private JCheckBox chkSyncPrivateKey;
-    private JCheckBox chkSyncPublicKey;
     private Runnable changeListener;
     private boolean suppressChangeEvents;
     private boolean editable = true;
@@ -373,21 +371,6 @@ public class SessionInfoPanel extends JPanel {
         inpExternalRefs.setWrapStyleWord(true);
         bindText(inpExternalRefs, value -> info.setExternalRefs(value));
 
-        chkSyncPrivateKey = new JCheckBox("Sync private key to Infisical");
-        chkSyncPrivateKey.addActionListener(e -> {
-            if (info != null) {
-                info.setSyncPrivateKey(chkSyncPrivateKey.isSelected());
-                touchAndNotify();
-            }
-        });
-        chkSyncPublicKey = new JCheckBox("Sync public key to Infisical");
-        chkSyncPublicKey.addActionListener(e -> {
-            if (info != null) {
-                info.setSyncPublicKey(chkSyncPublicKey.isSelected());
-                touchAndNotify();
-            }
-        });
-
         int row = 0;
         addLabel(panel, "Provider", row++, labelInset);
         addField(panel, cmbProvider, row++, fieldInset);
@@ -402,8 +385,6 @@ public class SessionInfoPanel extends JPanel {
         addField(panel, new JScrollPane(inpDescription), row++, fieldInset);
         addLabel(panel, "External refs", row++, labelInset);
         addField(panel, new JScrollPane(inpExternalRefs), row++, fieldInset);
-        addField(panel, chkSyncPrivateKey, row++, fieldInset);
-        addField(panel, chkSyncPublicKey, row++, fieldInset);
 
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0;
@@ -840,8 +821,6 @@ public class SessionInfoPanel extends JPanel {
         inpTags.setText(info.getTags());
         inpDescription.setText(info.getDescription());
         inpExternalRefs.setText(info.getExternalRefs());
-        chkSyncPrivateKey.setSelected(info.isSyncPrivateKey());
-        chkSyncPublicKey.setSelected(info.isSyncPublicKey());
         applyBillingModeToInfo(billingMode);
         updateBillingModeState();
     }
@@ -949,7 +928,8 @@ public class SessionInfoPanel extends JPanel {
         lblProxyHost.setHorizontalAlignment(JLabel.LEADING);
         JLabel lblProxyPort = new JLabel(App.getCONTEXT().getBundle().getString("proxy_port"));
         JLabel lblProxyUser = new JLabel(App.getCONTEXT().getBundle().getString("proxy_user"));
-        JLabel lblProxyPass = new JLabel(App.getCONTEXT().getBundle().getString("proxy_password") + App.getCONTEXT().getBundle().getString("warning_plain_text"));
+        JLabel lblProxyPass = new JLabel(App.getCONTEXT().getBundle().getString("proxy_password")
+                + App.getCONTEXT().getBundle().getString("credential_store_hint"));
 
         cmbProxy = new JComboBox<>(new String[]{"NONE", "HTTP", "SOCKS"});
         cmbProxy.addActionListener(e -> {

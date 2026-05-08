@@ -59,9 +59,7 @@ public class VpsHostRepository {
             try (Connection connection = VpsDatabaseManager.openConnection()) {
                 connection.setAutoCommit(false);
                 try {
-                    clearTreeTables(connection);
-                    saveFolder(connection, null, folder, 0);
-                    saveState(connection, "last_selection", lastSelectionPath);
+                    writeTree(connection, folder, lastSelectionPath);
                     connection.commit();
                 } catch (Exception e) {
                     connection.rollback();
@@ -74,6 +72,35 @@ public class VpsHostRepository {
             throw new IOException("Unable to save VPS Ledger database", e);
         } catch (Exception e) {
             throw new IOException("Unable to save VPS Ledger data", e);
+        }
+    }
+
+    public synchronized void replaceSnapshotState(SavedSessionTree tree, List<ProviderRecord> providers, long localStateUpdatedAt)
+            throws IOException {
+        SavedSessionTree snapshotTree = tree == null ? createDefaultTree() : tree;
+        if (snapshotTree.getFolder() == null) {
+            snapshotTree.setFolder(createDefaultTree().getFolder());
+        }
+        try {
+            VpsDatabaseManager.migrate();
+            try (Connection connection = VpsDatabaseManager.openConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    providerRepository.replaceProviders(connection, providers);
+                    writeTree(connection, snapshotTree.getFolder(), snapshotTree.getLastSelection());
+                    saveState(connection, "infisical_local_state_updated_at", String.valueOf(localStateUpdatedAt));
+                    connection.commit();
+                } catch (Exception e) {
+                    connection.rollback();
+                    throw e;
+                } finally {
+                    connection.setAutoCommit(true);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IOException("Unable to replace VPS Ledger snapshot", e);
+        } catch (Exception e) {
+            throw new IOException("Unable to replace VPS Ledger snapshot data", e);
         }
     }
 
@@ -132,6 +159,29 @@ public class VpsHostRepository {
 
     public synchronized SessionInfo fromHostJson(String json) throws IOException {
         return objectMapper.readValue(json, SessionInfo.class);
+    }
+
+    public synchronized String getAppStateValue(String key) {
+        try {
+            VpsDatabaseManager.migrate();
+            try (Connection connection = VpsDatabaseManager.openConnection()) {
+                return readState(connection, key);
+            }
+        } catch (Exception e) {
+            log.error("Unable to read app state {}", key, e);
+            return null;
+        }
+    }
+
+    public synchronized void saveAppStateValue(String key, String value) {
+        try {
+            VpsDatabaseManager.migrate();
+            try (Connection connection = VpsDatabaseManager.openConnection()) {
+                saveState(connection, key, value);
+            }
+        } catch (Exception e) {
+            log.error("Unable to save app state {}", key, e);
+        }
     }
 
     private void importLegacyJsonIfNeeded() throws Exception {
@@ -271,6 +321,12 @@ public class VpsHostRepository {
             statement.executeUpdate("DELETE FROM folders");
             statement.executeUpdate("DELETE FROM hosts");
         }
+    }
+
+    private void writeTree(Connection connection, SessionFolder folder, String lastSelectionPath) throws Exception {
+        clearTreeTables(connection);
+        saveFolder(connection, null, folder, 0);
+        saveState(connection, "last_selection", lastSelectionPath);
     }
 
     private void saveFolder(Connection connection, String parentId, SessionFolder folder, int position) throws Exception {

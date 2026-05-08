@@ -36,7 +36,11 @@ public class SessionStore {
         SavedSessionTree savedSessionTree = VPS_HOST_REPOSITORY.loadTree();
         try {
             log.debug("Loading passwords...");
-            PasswordStore.getSharedInstance().populatePassword(savedSessionTree);
+            PasswordStore passwordStore = PasswordStore.getSharedInstance();
+            passwordStore.populatePassword(savedSessionTree);
+            if (passwordStore.consumePlaintextScrubNeeded() && savedSessionTree != null && savedSessionTree.getFolder() != null) {
+                VPS_HOST_REPOSITORY.saveTree(savedSessionTree.getFolder(), savedSessionTree.getLastSelection());
+            }
             log.debug("Loading passwords... done");
         } catch (Exception e) {
             log.error(e.getMessage(), e);
@@ -58,7 +62,8 @@ public class SessionStore {
             });
             try {
                 log.debug("Loading passwords...");
-                PasswordStore.getSharedInstance().populatePassword(savedSessionTree);
+                PasswordStore passwordStore = PasswordStore.getSharedInstance();
+                passwordStore.populatePassword(savedSessionTree);
                 log.debug("Loading passwords... done");
             } catch (Exception e) {
                 log.error(e.getMessage(), e);
@@ -87,6 +92,9 @@ public class SessionStore {
                 PasswordStore.getSharedInstance().savePasswords(tree);
             } catch (Exception e) {
                 log.error(e.getMessage(), e);
+            }
+            if (App.getInfisicalSyncService() != null) {
+                App.getInfisicalSyncService().notifyLocalStateChanged();
             }
             VpsLedgerServices.syncVikunjaPaymentsAsync(folder, lastSelectionPath);
         } catch (IOException e) {

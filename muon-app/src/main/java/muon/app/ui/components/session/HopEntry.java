@@ -1,5 +1,7 @@
 package muon.app.ui.components.session;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -23,6 +25,16 @@ public class HopEntry {
         this.keypath = keypath;
     }
     public HopEntry() {
+    }
+
+    @JsonIgnore
+    public String getPassword() {
+        return password;
+    }
+
+    @JsonProperty
+    public void setPassword(String password) {
+        this.password = password;
     }
 
     @Override

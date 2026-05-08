@@ -69,6 +69,7 @@ public class AppWindow extends JFrame {
     private JPopupMenu popup;
     private JLabel lblUpdate;
     private JLabel lblUpdateText;
+    private JLabel lblInfisicalStatus;
 
     public AppWindow() {
         super(APPLICATION_NAME);
@@ -216,6 +217,9 @@ public class AppWindow extends JFrame {
         saveWindowBounds();
         if (sessionListPanel != null) {
             sessionListPanel.closeAllSessionsForShutdown();
+        }
+        if (App.getInfisicalSyncService() != null) {
+            App.getInfisicalSyncService().shutdown();
         }
 
         if (exitJvm) {
@@ -436,6 +440,10 @@ public class AppWindow extends JFrame {
 
         b1.add(createRepositoryLabel());
         b1.add(Box.createHorizontalGlue());
+
+        lblInfisicalStatus = new JLabel("Infisical: syncing...");
+        b1.add(lblInfisicalStatus);
+        b1.add(createSpacer(10, 10));
 
         if (App.getGlobalSettings().isEnabledK8sContextPlugin() && kubeContextSelectorPanel.isCommandWorking()) {
             createK8sLabel(kubeContextSelectorPanel.getCurrentContext());
@@ -669,6 +677,14 @@ public class AppWindow extends JFrame {
             }
         });
 
+    }
+
+    public void setInfisicalStatus(String statusText) {
+        if (lblInfisicalStatus != null) {
+            lblInfisicalStatus.setText(statusText == null || statusText.isBlank()
+                    ? "Infisical: syncing..."
+                    : statusText);
+        }
     }
 
 }
