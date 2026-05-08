@@ -8,8 +8,13 @@ import muon.app.vps.ProviderRecord;
 import muon.app.vps.VpsProviderRepository;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.ListSelectionEvent;
+import javax.swing.text.JTextComponent;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.IOException;
 
 import static muon.app.util.ScalingUtil.getScaledEmptyBorder;
@@ -31,6 +36,9 @@ public class ProvidersDialog extends JDialog {
 
     private ProviderRecord current;
     private boolean updatingFields;
+    private boolean hasUnsavedChanges;
+    private boolean suppressSelectionEvents;
+    private boolean pendingChangesSaved;
 
     public ProvidersDialog(Window owner) {
         super(owner, "Providers", ModalityType.APPLICATION_MODAL);
@@ -42,6 +50,13 @@ public class ProvidersDialog extends JDialog {
         setLayout(new BorderLayout(scale(10), scale(10)));
         setSize(scale(860), scale(560));
         setLocationRelativeTo(App.getAppWindow());
+        setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                closeDialog();
+            }
+        });
 
         providerList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         providerList.addListSelectionListener(this::providerSelected);
@@ -52,6 +67,7 @@ public class ProvidersDialog extends JDialog {
         txtNotes.setRows(5);
         txtNotes.setLineWrap(true);
         txtNotes.setWrapStyleWord(true);
+        addDirtyTracking();
 
         JPanel form = new JPanel(new GridBagLayout());
         form.setBorder(getScaledEmptyBorder(10, 10, 0, 10));
@@ -81,7 +97,7 @@ public class ProvidersDialog extends JDialog {
         btnNew.addActionListener(e -> newProvider());
         btnSave.addActionListener(e -> saveProvider());
         btnDelete.addActionListener(e -> deleteProvider());
-        btnClose.addActionListener(e -> dispose());
+        btnClose.addActionListener(e -> closeDialog());
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, scale(8), scale(8)));
         buttons.add(btnNew);
@@ -110,28 +126,73 @@ public class ProvidersDialog extends JDialog {
     }
 
     private void providerSelected(ListSelectionEvent event) {
-        if (event.getValueIsAdjusting()) {
+        if (event.getValueIsAdjusting() || suppressSelectionEvents) {
             return;
         }
-        current = providerList.getSelectedValue();
+        ProviderRecord selected = providerList.getSelectedValue();
+        String selectedId = selected == null ? null : selected.getId();
+        if (isCurrentProvider(selected)) {
+            return;
+        }
+        if (!confirmPendingChanges()) {
+            restoreCurrentSelection();
+            return;
+        }
+        if (pendingChangesSaved) {
+            reloadProviders(selectedId);
+            return;
+        }
+        current = selected;
         showProvider(current);
     }
 
     private void reloadProviders() {
-        providerModel.clear();
-        for (ProviderRecord provider : repository.listProviders()) {
-            providerModel.addElement(provider);
+        reloadProviders(null);
+    }
+
+    private void reloadProviders(String selectedId) {
+        suppressSelectionEvents = true;
+        try {
+            providerModel.clear();
+            for (ProviderRecord provider : repository.listProviders()) {
+                providerModel.addElement(provider);
+            }
+            if (!providerModel.isEmpty()) {
+                int index = findProviderIndex(selectedId);
+                providerList.setSelectedIndex(index >= 0 ? index : 0);
+                providerList.ensureIndexIsVisible(providerList.getSelectedIndex());
+            } else {
+                providerList.clearSelection();
+            }
+        } finally {
+            suppressSelectionEvents = false;
         }
-        if (!providerModel.isEmpty()) {
-            providerList.setSelectedIndex(0);
+        if (providerModel.isEmpty()) {
+            startNewProvider();
         } else {
-            newProvider();
+            current = providerList.getSelectedValue();
+            showProvider(current);
         }
     }
 
     private void newProvider() {
+        if (!confirmPendingChanges()) {
+            return;
+        }
+        if (pendingChangesSaved) {
+            reloadProviders(current == null ? null : current.getId());
+        }
+        startNewProvider();
+    }
+
+    private void startNewProvider() {
         current = new ProviderRecord();
-        providerList.clearSelection();
+        suppressSelectionEvents = true;
+        try {
+            providerList.clearSelection();
+        } finally {
+            suppressSelectionEvents = false;
+        }
         showProvider(current);
     }
 
@@ -147,34 +208,23 @@ public class ProvidersDialog extends JDialog {
             txtNotes.setText(provider == null ? "" : provider.getNotes());
         } finally {
             updatingFields = false;
+            clearDirty();
         }
     }
 
     private void saveProvider() {
-        if (updatingFields) {
-            return;
-        }
-        if (current == null) {
-            current = new ProviderRecord();
-        }
-        current.setName(txtName.getText());
-        current.setWebsite(txtWebsite.getText());
-        current.setPanelUrl(txtPanelUrl.getText());
-        current.setBillingUrl(txtBillingUrl.getText());
-        current.setAccountId(txtAccountId.getText());
-        current.setTags(txtTags.getText());
-        current.setNotes(txtNotes.getText());
-        try {
-            ProviderRecord saved = repository.upsertProvider(current);
-            reloadProviders();
-            selectProvider(saved.getId());
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, e.getMessage(), App.getCONTEXT().getBundle().getString("error"),
-                    JOptionPane.ERROR_MESSAGE);
+        if (saveCurrentProvider()) {
+            reloadProviders(current == null ? null : current.getId());
         }
     }
 
     private void deleteProvider() {
+        if (!confirmPendingChanges()) {
+            return;
+        }
+        if (pendingChangesSaved) {
+            reloadProviders(current == null ? null : current.getId());
+        }
         if (current == null || current.getId() == null || current.getId().isBlank()) {
             return;
         }
@@ -192,6 +242,10 @@ public class ProvidersDialog extends JDialog {
     }
 
     private void selectProvider(String id) {
+        if (id == null || id.isBlank()) {
+            providerList.clearSelection();
+            return;
+        }
         for (int i = 0; i < providerModel.size(); i++) {
             ProviderRecord provider = providerModel.get(i);
             if (id.equals(provider.getId())) {
@@ -200,5 +254,143 @@ public class ProvidersDialog extends JDialog {
                 return;
             }
         }
+    }
+
+    private int findProviderIndex(String id) {
+        if (id == null || id.isBlank()) {
+            return -1;
+        }
+        for (int i = 0; i < providerModel.size(); i++) {
+            ProviderRecord provider = providerModel.get(i);
+            if (id.equals(provider.getId())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isCurrentProvider(ProviderRecord selected) {
+        if (current == selected) {
+            return true;
+        }
+        if (current == null || selected == null || current.getId() == null || current.getId().isBlank()) {
+            return false;
+        }
+        return current.getId().equals(selected.getId());
+    }
+
+    private void restoreCurrentSelection() {
+        suppressSelectionEvents = true;
+        try {
+            if (current != null && current.getId() != null && !current.getId().isBlank()) {
+                selectProvider(current.getId());
+            } else {
+                providerList.clearSelection();
+            }
+        } finally {
+            suppressSelectionEvents = false;
+        }
+    }
+
+    private void closeDialog() {
+        if (confirmPendingChanges()) {
+            dispose();
+        }
+    }
+
+    private boolean confirmPendingChanges() {
+        pendingChangesSaved = false;
+        if (!hasUnsavedChanges) {
+            return true;
+        }
+        int choice = JOptionPane.showConfirmDialog(this,
+                App.getCONTEXT().getBundle().getString("confirm_close_unsaved"),
+                "Providers",
+                JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (choice == JOptionPane.CANCEL_OPTION || choice == JOptionPane.CLOSED_OPTION) {
+            return false;
+        }
+        if (choice == JOptionPane.YES_OPTION) {
+            if (!saveCurrentProvider()) {
+                return false;
+            }
+            pendingChangesSaved = true;
+            return true;
+        }
+        showProvider(current);
+        return true;
+    }
+
+    private boolean saveCurrentProvider() {
+        if (updatingFields) {
+            return true;
+        }
+        ProviderRecord provider = createProviderFromFields();
+        try {
+            current = repository.upsertProvider(provider);
+            clearDirty();
+            return true;
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(), App.getCONTEXT().getBundle().getString("error"),
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    private ProviderRecord createProviderFromFields() {
+        ProviderRecord provider = new ProviderRecord();
+        if (current != null) {
+            provider.setId(current.getId());
+            provider.setUpdatedAt(current.getUpdatedAt());
+            provider.setDeleted(current.isDeleted());
+        }
+        provider.setName(txtName.getText());
+        provider.setWebsite(txtWebsite.getText());
+        provider.setPanelUrl(txtPanelUrl.getText());
+        provider.setBillingUrl(txtBillingUrl.getText());
+        provider.setAccountId(txtAccountId.getText());
+        provider.setTags(txtTags.getText());
+        provider.setNotes(txtNotes.getText());
+        return provider;
+    }
+
+    private void addDirtyTracking() {
+        addDirtyTracking(txtName);
+        addDirtyTracking(txtWebsite);
+        addDirtyTracking(txtPanelUrl);
+        addDirtyTracking(txtBillingUrl);
+        addDirtyTracking(txtAccountId);
+        addDirtyTracking(txtTags);
+        addDirtyTracking(txtNotes);
+    }
+
+    private void addDirtyTracking(JTextComponent component) {
+        component.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                markDirty();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                markDirty();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                markDirty();
+            }
+        });
+    }
+
+    private void markDirty() {
+        if (!updatingFields) {
+            hasUnsavedChanges = true;
+        }
+    }
+
+    private void clearDirty() {
+        hasUnsavedChanges = false;
     }
 }

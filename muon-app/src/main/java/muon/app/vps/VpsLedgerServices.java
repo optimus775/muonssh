@@ -38,7 +38,7 @@ public final class VpsLedgerServices {
 
     public static void syncVikunjaPaymentsAsync(SessionFolder folder, String lastSelectionPath) {
         Settings settings = App.getGlobalSettings();
-        if (!isVikunjaConfigured(settings)) {
+        if (!isVikunjaConfigured(settings) || !settings.isUsingMasterPassword()) {
             return;
         }
         List<SessionInfo> sessions = collectSessions(folder);
@@ -73,6 +73,10 @@ public final class VpsLedgerServices {
 
     public static void syncVikunjaNow(Component parent, SessionInfo info) {
         Settings settings = App.getGlobalSettings();
+        if (!settings.isUsingMasterPassword()) {
+            showMessage(parent, "Enable master password before using VPS Ledger integration API keys.", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         if (!isVikunjaConfigured(settings)) {
             showMessage(parent, "Configure Vikunja base URL, project ID and API token first.", JOptionPane.WARNING_MESSAGE);
             return;
@@ -101,6 +105,10 @@ public final class VpsLedgerServices {
 
     public static void syncInfisicalNow(Component parent) {
         Settings settings = App.getGlobalSettings();
+        if (!settings.isUsingMasterPassword()) {
+            showMessage(parent, "Enable master password before using VPS Ledger integration API keys.", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         if (!isInfisicalConfigured(settings)) {
             showMessage(parent, "Configure Infisical project, environment, client ID and client secret first.", JOptionPane.WARNING_MESSAGE);
             return;

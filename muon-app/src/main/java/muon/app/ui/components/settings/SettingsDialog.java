@@ -37,6 +37,7 @@ import static muon.app.util.ScalingUtil.*;
 @Slf4j
 public class SettingsDialog extends JDialog {
     public static final String CHANGE_PASSWORD_FAILED = "change_password_failed";
+    private static final String VPS_LEDGER_PAGE = "VPS Ledger";
     private final EditorTableModel editorModel = new EditorTableModel();
     private final DefaultComboBoxModel<ConflictAction> conflictOptions = new DefaultComboBoxModel<>(ConflictAction.values());
     private final CardLayout cardLayout;
@@ -106,6 +107,7 @@ public class SettingsDialog extends JDialog {
     private JTextField txtInfisicalOrganizationSlug;
     private JPasswordField txtInfisicalClientSecret;
     private JCheckBox chkInfisicalSyncPrivateKeys;
+    private boolean integrationSecretsLoaded;
 
     private Color[] getIndexColors() {
         return new Color[]{
@@ -161,7 +163,7 @@ public class SettingsDialog extends JDialog {
         panelMap.put(App.getCONTEXT().getBundle().getString("editor"), createEditorPanel());
         panelMap.put(App.getCONTEXT().getBundle().getString("display"), createMiscPanel());
         panelMap.put(App.getCONTEXT().getBundle().getString("security"), createSecurityPanel());
-        panelMap.put("VPS Ledger", createVpsLedgerPanel());
+        panelMap.put(VPS_LEDGER_PAGE, createVpsLedgerPanel());
         panelMap.put(App.getCONTEXT().getBundle().getString("plugins"), createPluginsPanel());
 
         for (Map.Entry<String, Component> panel : panelMap.entrySet()) {
@@ -561,6 +563,10 @@ public class SettingsDialog extends JDialog {
     }
 
     private void applySettings() {
+        if (!saveIntegrationSecrets()) {
+            return;
+        }
+
         Settings settings = App.getGlobalSettings();
         settings.setTerminalBell(this.chkAudibleBell.isSelected());
         settings.setPuttyLikeCopyPaste(this.chkPuttyLikeCopyPaste.isSelected());
@@ -633,6 +639,13 @@ public class SettingsDialog extends JDialog {
 
         settings.setEnabledK8sContextPlugin(chkK8sPlugin.isSelected());
 
+        applyVpsLedgerSettings(settings);
+
+        App.getCONTEXT().getSettingsManager().saveSettings();
+        super.setVisible(false);
+    }
+
+    private void applyVpsLedgerSettings(Settings settings) {
         settings.setVikunjaBaseUrl(txtVikunjaBaseUrl.getText().trim());
         settings.setVikunjaProjectId((Long) spVikunjaProjectId.getValue());
         settings.setVikunjaReminderOffsetDays((Integer) spVikunjaReminderDays.getValue());
@@ -644,22 +657,97 @@ public class SettingsDialog extends JDialog {
         settings.setInfisicalClientId(txtInfisicalClientId.getText().trim());
         settings.setInfisicalOrganizationSlug(txtInfisicalOrganizationSlug.getText().trim());
         settings.setInfisicalSyncPrivateKeys(chkInfisicalSyncPrivateKeys.isSelected());
-
-        saveIntegrationSecrets();
-
-        App.getCONTEXT().getSettingsManager().saveSettings();
-        super.setVisible(false);
     }
 
-    private void saveIntegrationSecrets() {
+    private boolean saveVpsLedgerSettings() {
+        if (!saveIntegrationSecrets()) {
+            return false;
+        }
+        applyVpsLedgerSettings(App.getGlobalSettings());
+        App.getCONTEXT().getSettingsManager().saveSettings();
+        return true;
+    }
+
+    private boolean saveIntegrationSecrets() {
         try {
+            if (!validateProtectedVpsLedgerStorage()) {
+                return false;
+            }
+
             PasswordStore store = PasswordStore.getSharedInstance();
+            if (!unlockPasswordStore(store)) {
+                return false;
+            }
+            if (!integrationSecretsLoaded && !hasVpsLedgerSecretFieldValues()) {
+                JOptionPane.showMessageDialog(this,
+                        "Unlock the password store before saving VPS Ledger settings.",
+                        App.getCONTEXT().getBundle().getString("error"),
+                        JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
             store.saveSecret(VikunjaClient.API_TOKEN_ALIAS, new String(txtVikunjaToken.getPassword()).trim());
             store.saveSecret(InfisicalClient.CLIENT_SECRET_ALIAS, new String(txtInfisicalClientSecret.getPassword()).trim());
+            integrationSecretsLoaded = true;
+            return true;
         } catch (Exception e) {
             log.error("Unable to save VPS Ledger integration secrets", e);
             JOptionPane.showMessageDialog(this, App.getCONTEXT().getBundle().getString("error_operation"), App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
+            return false;
         }
+    }
+
+    private boolean validateProtectedVpsLedgerStorage() {
+        if (!hasVpsLedgerSecurityMaterial() || App.getGlobalSettings().isUsingMasterPassword()) {
+            return true;
+        }
+        showVpsLedgerMasterPasswordRequired();
+        return false;
+    }
+
+    private boolean hasVpsLedgerSecurityMaterial() {
+        return hasVpsLedgerSecretFieldValues()
+                || chkInfisicalSyncPrivateKeys.isSelected();
+    }
+
+    private boolean hasVpsLedgerSecretFieldValues() {
+        return hasPasswordValue(txtVikunjaToken)
+                || hasPasswordValue(txtInfisicalClientSecret);
+    }
+
+    private boolean hasPasswordValue(JPasswordField field) {
+        char[] password = field.getPassword();
+        for (char c : password) {
+            if (!Character.isWhitespace(c)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void showVpsLedgerMasterPasswordRequired() {
+        navList.setSelectedValue(VPS_LEDGER_PAGE, true);
+        JOptionPane.showMessageDialog(this,
+                "Enable master password before saving VPS Ledger API keys or allowing SSH key sync to Infisical.",
+                App.getCONTEXT().getBundle().getString("error"),
+                JOptionPane.ERROR_MESSAGE);
+    }
+
+    private boolean unlockPasswordStore(PasswordStore store) throws Exception {
+        if (store.isUnlocked()) {
+            return true;
+        }
+        if (App.getGlobalSettings().isUsingMasterPassword()) {
+            return store.unlockUsingMasterPassword();
+        }
+        store.unlockStore(new char[0]);
+        return true;
+    }
+
+    private boolean hasStoredVpsLedgerSecrets(PasswordStore store) {
+        String vikunjaToken = store.getSecret(VikunjaClient.API_TOKEN_ALIAS);
+        String infisicalClientSecret = store.getSecret(InfisicalClient.CLIENT_SECRET_ALIAS);
+        return (vikunjaToken != null && !vikunjaToken.isBlank())
+                || (infisicalClientSecret != null && !infisicalClientSecret.isBlank());
     }
 
     public boolean showDialog(JFrame window, SettingsPageName page) {
@@ -779,12 +867,19 @@ public class SettingsDialog extends JDialog {
     }
 
     private void loadIntegrationSecrets() {
+        integrationSecretsLoaded = false;
+        txtVikunjaToken.setText("");
+        txtInfisicalClientSecret.setText("");
         try {
             PasswordStore store = PasswordStore.getSharedInstance();
+            if (!unlockPasswordStore(store)) {
+                return;
+            }
             String vikunjaToken = store.getSecret(VikunjaClient.API_TOKEN_ALIAS);
             txtVikunjaToken.setText(vikunjaToken == null ? "" : vikunjaToken);
             String infisicalClientSecret = store.getSecret(InfisicalClient.CLIENT_SECRET_ALIAS);
             txtInfisicalClientSecret.setText(infisicalClientSecret == null ? "" : infisicalClientSecret);
+            integrationSecretsLoaded = true;
         } catch (Exception e) {
             log.error("Unable to load VPS Ledger integration secrets", e);
             txtVikunjaToken.setText("");
@@ -946,7 +1041,11 @@ public class SettingsDialog extends JDialog {
         chkInfisicalSyncPrivateKeys = new JCheckBox("Allow SSH key sync to Infisical");
 
         JButton btnSyncInfisical = new JButton("Sync Infisical now");
-        btnSyncInfisical.addActionListener(e -> VpsLedgerServices.syncInfisicalNow(this));
+        btnSyncInfisical.addActionListener(e -> {
+            if (saveVpsLedgerSettings()) {
+                VpsLedgerServices.syncInfisicalNow(this);
+            }
+        });
 
         vbox.add(createTitleLabel("Vikunja"));
         vbox.add(Box.createVerticalStrut(10));
@@ -1026,7 +1125,14 @@ public class SettingsDialog extends JDialog {
                     chkUseMasterPassword.setSelected(true);
                     throw new IllegalArgumentException(App.getCONTEXT().getBundle().getString(CHANGE_PASSWORD_FAILED));
                 }
-                PasswordStore.getSharedInstance().changeStorePassword(new char[0]);
+                PasswordStore store = PasswordStore.getSharedInstance();
+                if (hasVpsLedgerSecurityMaterial() || hasStoredVpsLedgerSecrets(store)) {
+                    chkUseMasterPassword.setSelected(true);
+                    btnChangeMasterPassword.setEnabled(true);
+                    showVpsLedgerMasterPasswordRequired();
+                    return;
+                }
+                store.changeStorePassword(new char[0]);
                 updateSettingsAndNotify(false, "password_unprotected");
                 return;
             }

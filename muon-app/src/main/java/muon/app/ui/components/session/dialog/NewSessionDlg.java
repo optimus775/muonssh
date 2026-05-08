@@ -38,10 +38,8 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
     private SessionInfoPanel sessionInfoPanel;
     private JButton btnConnect;
     private JButton btnCancel;
-    private JButton btnEdit;
+    private JButton btnSave;
     private JButton btnDisconnect;
-    private boolean editMode = false;
-    private boolean pendingEditOnSelect = false;
     private JTextField txtName;
     private NamedItem selectedInfo;
     private SessionInfo info;
@@ -144,9 +142,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         btnDup.addActionListener(this);
         btnDup.putClientProperty(BUTTON_NAME, "btnDup");
 
-        btnEdit = new JButton(App.getCONTEXT().getBundle().getString("edit"));
-        btnEdit.addActionListener(this);
-        btnEdit.putClientProperty(BUTTON_NAME, "btnEdit");
+        btnSave = new JButton(App.getCONTEXT().getBundle().getString("save"));
+        btnSave.addActionListener(this);
+        btnSave.putClientProperty(BUTTON_NAME, "btnSave");
 
         btnConnect = new JButton(App.getCONTEXT().getBundle().getString("connect"));
         btnConnect.addActionListener(this);
@@ -180,7 +178,7 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         box1.add(btnDisconnect);
         box1.add(Box.createHorizontalGlue());
         box1.add(Box.createHorizontalStrut(10));
-        box1.add(btnEdit);
+        box1.add(btnSave);
         box1.add(Box.createHorizontalStrut(10));
         box1.add(btnConnect);
         box1.add(Box.createHorizontalStrut(10));
@@ -293,7 +291,6 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         txtName.setVisible(false);
         sessionInfoPanel.setVisible(false);
         btnConnect.setVisible(false);
-        setEditMode(false);
 
         groupPopupMenu = new JPopupMenu();
         JMenuItem sortAZMenuItem = new JMenuItem("Sort A-Z");
@@ -435,13 +432,8 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             case "btnDup":
                 duplicateNode();
                 break;
-            case "btnEdit":
-                if (editMode) {
-                    save();
-                    setEditMode(false);
-                } else {
-                    setEditMode(true);
-                }
+            case "btnSave":
+                save();
                 break;
             case "btnConnect":
                 connectClicked();
@@ -713,10 +705,8 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         treeModel.insertNodeInto(childNode1, parentNode, parentNode.getChildCount());
         tree.scrollPathToVisible(new TreePath(childNode1.getPath()));
         TreePath path2 = new TreePath(childNode1.getPath());
-        pendingEditOnSelect = true;
         tree.clearSelection();
         tree.setSelectionPath(path2);
-        setEditMode(true);
     }
 
     private void createNewHost(DefaultMutableTreeNode parentNode) {
@@ -731,10 +721,8 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         DefaultMutableTreeNode childNode = getNode(parentNode, rootNode, treeModel);
         tree.scrollPathToVisible(new TreePath(childNode.getPath()));
         TreePath path = new TreePath(childNode.getPath());
-        pendingEditOnSelect = true;
         tree.clearSelection();
         tree.setSelectionPath(path);
-        setEditMode(true);
     }
 
     private void connectClicked() {
@@ -772,10 +760,6 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
             return;
         }
 
-        boolean shouldEdit = pendingEditOnSelect || editMode;
-        pendingEditOnSelect = false;
-        setEditMode(shouldEdit);
-
         Object nodeInfo = node.getUserObject();
         if (nodeInfo instanceof SessionInfo) {
             sessionInfoPanel.setVisible(true);
@@ -808,10 +792,13 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         TreePath path = tree.getSelectionPath();
         if (path != null) {
             DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
-            NamedItem item = (NamedItem) node.getUserObject();
-            id = item.getId();
-            if (id == null || id.isEmpty()) {
-                id = getNewUuid(rootNode);
+            Object userObject = node.getUserObject();
+            if (userObject instanceof NamedItem) {
+                NamedItem item = (NamedItem) userObject;
+                id = item.getId();
+                if (id == null || id.isEmpty()) {
+                    id = getNewUuid(rootNode);
+                }
             }
         }
         boolean previousSuppress = suppressTreeEvents;
@@ -1036,42 +1023,12 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         return false;
     }
 
-    private void toggleEditMode() {
-        setEditMode(!editMode);
-    }
-
-    private void setEditMode(boolean enable) {
-        this.editMode = enable;
-        if (btnEdit != null) {
-            btnEdit.setText(App.getCONTEXT().getBundle().getString(enable ? "save" : "edit"));
-        }
-        if (txtName != null) {
-            // Keep field enabled; only toggle editability to keep colors consistent with Host in view mode.
-            txtName.setEnabled(true);
-            txtName.setEditable(enable);
-            txtName.setFocusable(enable);
-            if (enable) {
-                txtName.setBackground(null);
-                txtName.setForeground(null);
-            } else {
-                Color readOnlyBg = App.getCONTEXT().getSkin().getReadOnlyFieldBackground();
-                Color readOnlyFg = App.getCONTEXT().getSkin().getReadOnlyFieldForeground();
-                txtName.setBackground(readOnlyBg);
-                txtName.setForeground(readOnlyFg);
-                txtName.setCaretColor(readOnlyFg);
-            }
-        }
-        if (sessionInfoPanel != null) {
-            sessionInfoPanel.setEditable(enable);
-        }
-    }
-
     private void normalizeButtonSize() {
         int width = Math.max(btnConnect.getPreferredSize().width, btnCancel.getPreferredSize().width);
-        width = Math.max(width, btnEdit.getPreferredSize().width);
+        width = Math.max(width, btnSave.getPreferredSize().width);
         btnConnect.setPreferredSize(scale(new Dimension(width, btnConnect.getPreferredSize().height)));
         btnCancel.setPreferredSize(scale(new Dimension(width, btnCancel.getPreferredSize().height)));
-        btnEdit.setPreferredSize(scale(new Dimension(width, btnEdit.getPreferredSize().height)));
+        btnSave.setPreferredSize(scale(new Dimension(width, btnSave.getPreferredSize().height)));
     }
 
     private static final class FolderTarget {
