@@ -131,8 +131,11 @@ public class VikunjaClient {
     }
 
     private String buildProviderTitle(SessionInfo info) {
-        String provider = firstNonBlank(info.getProvider(), "Provider");
         String name = firstNonBlank(info.getName(), info.getHost());
+        String provider = firstNonBlank(info.getProvider(), null);
+        if (provider == null) {
+            return Objects.toString(name, "");
+        }
         return provider + ": " + Objects.toString(name, "");
     }
 

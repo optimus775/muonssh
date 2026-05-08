@@ -7,14 +7,17 @@ import muon.app.util.Constants;
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.HashSet;
+import java.util.Set;
 
 @Slf4j
 public final class VpsDatabaseManager {
 
-    private static final int CURRENT_SCHEMA = 2;
+    private static final int CURRENT_SCHEMA = 3;
 
     private VpsDatabaseManager() {
     }
@@ -132,6 +135,53 @@ public final class VpsDatabaseManager {
                 statement.execute("UPDATE hosts SET billing_period_type = COALESCE(NULLIF(billing_period_type, ''), 'fixed_period')");
                 statement.execute("UPDATE hosts SET billing_period_days = COALESCE(billing_period_days, billing_cycle_days)");
                 statement.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (2, " + now + ")");
+                version = 2;
+            }
+            if (version < 3) {
+                log.info("Applying VPS Ledger schema migration 3");
+                statement.execute("DROP INDEX IF EXISTS idx_providers_name_unique");
+                statement.execute("DROP TABLE IF EXISTS providers_v3");
+                statement.execute("CREATE TABLE IF NOT EXISTS providers_v3 ("
+                        + "id TEXT PRIMARY KEY, "
+                        + "name TEXT NOT NULL, "
+                        + "slug TEXT NOT NULL, "
+                        + "website TEXT, "
+                        + "account_id TEXT, "
+                        + "notes TEXT, "
+                        + "tags TEXT, "
+                        + "updated_at INTEGER NOT NULL, "
+                        + "deleted INTEGER NOT NULL DEFAULT 0"
+                        + ")");
+                migrateProvidersToSchema3(connection);
+                statement.execute("DROP TABLE providers");
+                statement.execute("ALTER TABLE providers_v3 RENAME TO providers");
+                statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_providers_name_unique ON providers(name COLLATE NOCASE) WHERE deleted = 0");
+                statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_providers_slug_unique ON providers(slug COLLATE NOCASE) WHERE deleted = 0");
+                statement.execute("CREATE INDEX IF NOT EXISTS idx_hosts_provider_id ON hosts(provider_id)");
+                statement.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (3, " + System.currentTimeMillis() + ")");
+            }
+        }
+    }
+
+    private static void migrateProvidersToSchema3(Connection connection) throws SQLException {
+        Set<String> usedSlugs = new HashSet<>();
+        try (Statement select = connection.createStatement();
+             ResultSet rs = select.executeQuery("SELECT * FROM providers ORDER BY updated_at, LOWER(name), id");
+             PreparedStatement insert = connection.prepareStatement(
+                     "INSERT INTO providers_v3(id, name, slug, website, account_id, notes, tags, updated_at, deleted) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            while (rs.next()) {
+                String slug = ProviderSlug.unique(rs.getString("name"), usedSlugs);
+                insert.setString(1, rs.getString("id"));
+                insert.setString(2, rs.getString("name"));
+                insert.setString(3, slug);
+                insert.setString(4, rs.getString("website"));
+                insert.setString(5, rs.getString("account_id"));
+                insert.setString(6, rs.getString("notes"));
+                insert.setString(7, rs.getString("tags"));
+                insert.setLong(8, rs.getLong("updated_at"));
+                insert.setInt(9, rs.getInt("deleted"));
+                insert.executeUpdate();
             }
         }
     }

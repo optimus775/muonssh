@@ -1,5 +1,6 @@
 package muon.app.vps;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import junit.framework.TestCase;
 import muon.app.App;
 import muon.app.common.PasswordStore;
@@ -74,8 +75,13 @@ public class InfisicalSyncServiceTest extends TestCase {
             assertEquals(info.getId(), state.getLastSelection());
             assertEquals(1, state.getProviders().size());
             assertEquals("Provider One", state.getProviders().get(0).getName());
+            assertEquals("provider-one", state.getProviders().get(0).getSlug());
             assertEquals(1, state.getTree().getFolder().getItems().size());
             assertNull(state.getTree().getFolder().getItems().get(0).getPassword());
+
+            String serializedState = new ObjectMapper().writeValueAsString(state);
+            assertFalse(serializedState.contains("panelUrl"));
+            assertFalse(serializedState.contains("billingUrl"));
 
             InfisicalAppState.HostSecretState hostSecret = state.getHostSecrets().get("host-1");
             assertNotNull(hostSecret);
@@ -196,6 +202,50 @@ public class InfisicalSyncServiceTest extends TestCase {
 
             assertEquals("REMOTE PRIVATE", Files.readString(remoteKeyPath));
             assertEquals("REMOTE PUBLIC", Files.readString(Path.of(remoteKeyPath + ".pub")));
+        } finally {
+            scheduler.shutdownNow();
+        }
+    }
+
+    public void testApplyRemoteStateAcceptsLegacyProviderPayloadWithoutUrlFields() throws Exception {
+        Path configDir = Files.createTempDirectory("infisical-sync-legacy-providers");
+        App.getCONTEXT().setConfigDir(configDir.toFile());
+        App.getCONTEXT().setSettings(new Settings());
+
+        String remoteJson = "{"
+                + "\"schema\":3,"
+                + "\"updatedAt\":200,"
+                + "\"lastSelection\":null,"
+                + "\"tree\":{\"folder\":{\"id\":\"root\",\"name\":\"My sites\",\"items\":[],\"folders\":[]},\"lastSelection\":null},"
+                + "\"providers\":[{"
+                + "\"id\":\"provider-remote\","
+                + "\"name\":\"Remote Provider\","
+                + "\"website\":\"https://remote.example\","
+                + "\"panelUrl\":\"https://remote.example/panel\","
+                + "\"billingUrl\":\"https://remote.example/billing\","
+                + "\"updatedAt\":200,"
+                + "\"deleted\":false"
+                + "}],"
+                + "\"hostSecrets\":{}"
+                + "}";
+
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        try {
+            InfisicalSyncService service = new InfisicalSyncService(
+                    new VpsHostRepository(),
+                    new VpsProviderRepository(),
+                    new InfisicalClient(),
+                    new ObjectMapper(),
+                    scheduler);
+
+            InfisicalAppState remoteState = new ObjectMapper().readValue(remoteJson, InfisicalAppState.class);
+            service.applyRemoteState(remoteState);
+
+            List<ProviderRecord> providers = new VpsProviderRepository().listProviders();
+            assertEquals(1, providers.size());
+            assertEquals("Remote Provider", providers.get(0).getName());
+            assertEquals("remote-provider", providers.get(0).getSlug());
+            assertEquals("https://remote.example", providers.get(0).getWebsite());
         } finally {
             scheduler.shutdownNow();
         }

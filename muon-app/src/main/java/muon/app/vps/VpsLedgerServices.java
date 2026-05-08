@@ -335,7 +335,7 @@ public final class VpsLedgerServices {
             }
             ProviderRecord local = localProviders.get(remote.getId());
             if (local == null || remote.getUpdatedAt() > local.getUpdatedAt()) {
-                PROVIDER_REPOSITORY.upsertProvider(remote);
+                PROVIDER_REPOSITORY.upsertImportedProvider(remote);
             }
         }
     }
@@ -386,7 +386,7 @@ public final class VpsLedgerServices {
             return;
         }
         info.setProvider(provider.getName());
-        String providerUrl = firstNonBlank(provider.getBillingUrl(), provider.getWebsite());
+        String providerUrl = provider.getWebsite();
         if (providerUrl != null) {
             info.setProviderUrl(providerUrl);
         }

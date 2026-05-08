@@ -277,7 +277,6 @@ public class VpsHostRepository {
 
     private String hostSelectSql(String suffix) {
         return "SELECT h.*, p.name AS provider_name, p.website AS provider_website, "
-                + "p.panel_url AS provider_panel_url, p.billing_url AS provider_billing_url, "
                 + "p.account_id AS provider_account_id "
                 + "FROM hosts h "
                 + "LEFT JOIN providers p ON p.id = h.provider_id "
@@ -293,11 +292,8 @@ public class VpsHostRepository {
         } else if (info.getProvider() == null || info.getProvider().isBlank()) {
             info.setProvider(rs.getString("provider"));
         }
-        String billingUrl = rs.getString("provider_billing_url");
         String providerWebsite = rs.getString("provider_website");
-        if ((info.getProviderUrl() == null || info.getProviderUrl().isBlank()) && billingUrl != null && !billingUrl.isBlank()) {
-            info.setProviderUrl(billingUrl);
-        } else if ((info.getProviderUrl() == null || info.getProviderUrl().isBlank()) && providerWebsite != null && !providerWebsite.isBlank()) {
+        if ((info.getProviderUrl() == null || info.getProviderUrl().isBlank()) && providerWebsite != null && !providerWebsite.isBlank()) {
             info.setProviderUrl(providerWebsite);
         }
         if (info.getAccountId() == null || info.getAccountId().isBlank()) {

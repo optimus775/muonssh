@@ -1,6 +1,7 @@
 package muon.app.vps;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
@@ -8,14 +9,22 @@ import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
 public class VpsProviderRepository {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public VpsProviderRepository() {
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
 
     public synchronized List<ProviderRecord> listProviders() {
         List<ProviderRecord> providers = new ArrayList<>();
@@ -84,20 +93,39 @@ public class VpsProviderRepository {
         if (provider == null || provider.getName() == null || provider.getName().trim().isEmpty()) {
             throw new IOException("Provider name can not be empty");
         }
-        if (provider.getId() == null || provider.getId().isBlank()) {
-            provider.setId(UUID.randomUUID().toString());
-        }
-        provider.setName(provider.getName().trim());
-        provider.setUpdatedAt(System.currentTimeMillis());
 
         try {
             VpsDatabaseManager.migrate();
             try (Connection connection = VpsDatabaseManager.openConnection()) {
-                upsertProvider(connection, provider);
+                boolean explicitSlug = provider.getSlug() != null && !provider.getSlug().isBlank();
+                if (!explicitSlug) {
+                    provider.setSlug(ProviderSlug.normalize(provider.getName()));
+                } else {
+                    provider.setSlug(ProviderSlug.normalize(provider.getSlug()));
+                    ensureSlugAvailable(connection, provider.getSlug(), provider.getId());
+                }
+                upsertProvider(connection, provider, explicitSlug, true);
+            }
+            return provider;
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Unable to save VPS provider", e);
+        }
+    }
+
+    public synchronized ProviderRecord upsertImportedProvider(ProviderRecord provider) throws IOException {
+        if (provider == null || provider.getName() == null || provider.getName().trim().isEmpty()) {
+            throw new IOException("Provider name can not be empty");
+        }
+        try {
+            VpsDatabaseManager.migrate();
+            try (Connection connection = VpsDatabaseManager.openConnection()) {
+                upsertProvider(connection, provider, false, false);
             }
             return provider;
         } catch (Exception e) {
-            throw new IOException("Unable to save VPS provider", e);
+            throw new IOException("Unable to import VPS provider", e);
         }
     }
 
@@ -119,16 +147,18 @@ public class VpsProviderRepository {
         }
     }
 
-    synchronized void upsertProvider(Connection connection, ProviderRecord provider) throws Exception {
+    synchronized void upsertProvider(Connection connection, ProviderRecord provider,
+                                     boolean preserveExplicitSlug, boolean touchUpdatedAt) throws Exception {
+        prepareProvider(provider, touchUpdatedAt);
+        provider.setSlug(resolveUniqueSlug(connection, provider, preserveExplicitSlug));
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO providers("
-                        + "id, name, website, panel_url, billing_url, account_id, notes, tags, updated_at, deleted"
-                        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "id, name, slug, website, account_id, notes, tags, updated_at, deleted"
+                        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT(id) DO UPDATE SET "
                         + "name = excluded.name, "
+                        + "slug = excluded.slug, "
                         + "website = excluded.website, "
-                        + "panel_url = excluded.panel_url, "
-                        + "billing_url = excluded.billing_url, "
                         + "account_id = excluded.account_id, "
                         + "notes = excluded.notes, "
                         + "tags = excluded.tags, "
@@ -136,14 +166,13 @@ public class VpsProviderRepository {
                         + "deleted = excluded.deleted")) {
             statement.setString(1, provider.getId());
             statement.setString(2, provider.getName());
-            statement.setString(3, provider.getWebsite());
-            statement.setString(4, provider.getPanelUrl());
-            statement.setString(5, provider.getBillingUrl());
-            statement.setString(6, provider.getAccountId());
-            statement.setString(7, provider.getNotes());
-            statement.setString(8, provider.getTags());
-            statement.setLong(9, provider.getUpdatedAt());
-            statement.setInt(10, provider.isDeleted() ? 1 : 0);
+            statement.setString(3, provider.getSlug());
+            statement.setString(4, provider.getWebsite());
+            statement.setString(5, provider.getAccountId());
+            statement.setString(6, provider.getNotes());
+            statement.setString(7, provider.getTags());
+            statement.setLong(8, provider.getUpdatedAt());
+            statement.setInt(9, provider.isDeleted() ? 1 : 0);
             statement.executeUpdate();
         }
     }
@@ -159,12 +188,8 @@ public class VpsProviderRepository {
             if (provider == null || provider.getName() == null || provider.getName().trim().isEmpty()) {
                 continue;
             }
-            if (provider.getId() == null || provider.getId().isBlank()) {
-                provider.setId(UUID.randomUUID().toString());
-            }
-            provider.setName(provider.getName().trim());
             provider.setDeleted(false);
-            upsertProvider(connection, provider);
+            upsertProvider(connection, provider, false, false);
         }
     }
 
@@ -181,11 +206,9 @@ public class VpsProviderRepository {
         provider.setId(UUID.randomUUID().toString());
         provider.setName(providerName.trim());
         provider.setWebsite(providerUrl);
-        provider.setPanelUrl(providerUrl);
-        provider.setBillingUrl(providerUrl);
         provider.setAccountId(accountId);
         provider.setUpdatedAt(System.currentTimeMillis());
-        upsertProvider(connection, provider);
+        upsertProvider(connection, provider, false, true);
         return provider.getId();
     }
 
@@ -218,14 +241,62 @@ public class VpsProviderRepository {
         ProviderRecord provider = new ProviderRecord();
         provider.setId(rs.getString("id"));
         provider.setName(rs.getString("name"));
+        provider.setSlug(rs.getString("slug"));
         provider.setWebsite(rs.getString("website"));
-        provider.setPanelUrl(rs.getString("panel_url"));
-        provider.setBillingUrl(rs.getString("billing_url"));
         provider.setAccountId(rs.getString("account_id"));
         provider.setNotes(rs.getString("notes"));
         provider.setTags(rs.getString("tags"));
         provider.setUpdatedAt(rs.getLong("updated_at"));
         provider.setDeleted(rs.getInt("deleted") != 0);
         return provider;
+    }
+
+    private void prepareProvider(ProviderRecord provider, boolean touchUpdatedAt) {
+        if (provider.getId() == null || provider.getId().isBlank()) {
+            provider.setId(UUID.randomUUID().toString());
+        }
+        provider.setName(provider.getName().trim());
+        provider.setSlug(ProviderSlug.normalize(provider.getSlug() == null || provider.getSlug().isBlank()
+                ? provider.getName()
+                : provider.getSlug()));
+        if (touchUpdatedAt || provider.getUpdatedAt() <= 0) {
+            provider.setUpdatedAt(System.currentTimeMillis());
+        }
+    }
+
+    private void ensureSlugAvailable(Connection connection, String slug, String providerId) throws SQLException, IOException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT id FROM providers WHERE LOWER(slug) = LOWER(?) AND deleted = 0")) {
+            statement.setString(1, slug);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    String existingId = rs.getString("id");
+                    if (providerId == null || !providerId.equals(existingId)) {
+                        throw new IOException("Provider slug must be unique");
+                    }
+                }
+            }
+        }
+    }
+
+    private String resolveUniqueSlug(Connection connection, ProviderRecord provider, boolean preserveExplicitSlug) throws Exception {
+        String baseSlug = ProviderSlug.normalize(provider.getSlug());
+        if (preserveExplicitSlug) {
+            return baseSlug;
+        }
+        Set<String> usedSlugs = new HashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT slug FROM providers WHERE deleted = 0 AND id <> ?")) {
+            statement.setString(1, provider.getId());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    String existingSlug = rs.getString("slug");
+                    if (existingSlug != null && !existingSlug.isBlank()) {
+                        usedSlugs.add(existingSlug.toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        }
+        return ProviderSlug.unique(baseSlug, usedSlugs);
     }
 }

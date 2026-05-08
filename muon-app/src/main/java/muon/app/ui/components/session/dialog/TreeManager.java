@@ -3,6 +3,7 @@ package muon.app.ui.components.session.dialog;
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
 import muon.app.ui.components.session.*;
+import muon.app.vps.VpsBillingDates;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -129,6 +130,7 @@ public class TreeManager {
         sessionInfo.setName(App.getCONTEXT().getBundle().getString("new_site"));
         sessionInfo.setId(getNewUuid(rootNode));
         sessionInfo.setUser("root");
+        sessionInfo.setNextPaymentDate(VpsBillingDates.nextMonthlyDate());
         DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(sessionInfo);
         childNode.setUserObject(sessionInfo);
         childNode.setAllowsChildren(false);

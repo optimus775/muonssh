@@ -7,8 +7,6 @@ import muon.app.vps.VpsDateFormat;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -21,10 +19,10 @@ public class VpsOverviewDialog extends JDialog {
 
     private final List<SessionInfo> allHosts;
     private final DefaultTableModel tableModel;
+    private final JTextField hostFilter;
     private final JTextField providerFilter;
     private final JTextField statusFilter;
     private final JTextField tagFilter;
-    private final JSpinner upcomingDays;
 
     public VpsOverviewDialog(Window owner, SessionFolder rootFolder) {
         super(owner, "VPS Ledger", ModalityType.APPLICATION_MODAL);
@@ -36,10 +34,10 @@ public class VpsOverviewDialog extends JDialog {
                 return false;
             }
         };
+        this.hostFilter = new JTextField(12);
         this.providerFilter = new JTextField(12);
         this.statusFilter = new JTextField(10);
         this.tagFilter = new JTextField(12);
-        this.upcomingDays = new JSpinner(new SpinnerNumberModel(60, 1, 3650, 1));
         createUI();
         refresh();
     }
@@ -51,23 +49,23 @@ public class VpsOverviewDialog extends JDialog {
 
         JPanel filters = new JPanel(new FlowLayout(FlowLayout.LEFT, scale(8), scale(8)));
         filters.setBorder(getScaledEmptyBorder(8, 8, 8, 8));
+        filters.add(new JLabel("Host"));
+        filters.add(hostFilter);
         filters.add(new JLabel("Provider"));
         filters.add(providerFilter);
         filters.add(new JLabel("Status"));
         filters.add(statusFilter);
         filters.add(new JLabel("Tag"));
         filters.add(tagFilter);
-        filters.add(new JLabel("Due within days"));
-        filters.add(upcomingDays);
 
         JButton apply = new JButton("Apply");
         JButton clear = new JButton("Clear");
         apply.addActionListener(e -> refresh());
         clear.addActionListener(e -> {
+            hostFilter.setText("");
             providerFilter.setText("");
             statusFilter.setText("");
             tagFilter.setText("");
-            upcomingDays.setValue(60);
             refresh();
         });
         filters.add(apply);
@@ -105,10 +103,10 @@ public class VpsOverviewDialog extends JDialog {
     }
 
     private boolean matches(SessionInfo info) {
-        return contains(info.getProvider(), providerFilter.getText())
+        return contains(info.getHost(), hostFilter.getText())
+                && contains(info.getProvider(), providerFilter.getText())
                 && contains(info.getVpsStatus(), statusFilter.getText())
-                && contains(info.getTags(), tagFilter.getText())
-                && dueWithin(getDueDate(info), (Integer) upcomingDays.getValue());
+                && contains(info.getTags(), tagFilter.getText());
     }
 
     private boolean contains(String source, String filter) {
@@ -118,19 +116,6 @@ public class VpsOverviewDialog extends JDialog {
         return Objects.toString(source, "")
                 .toLowerCase(Locale.ROOT)
                 .contains(filter.toLowerCase(Locale.ROOT).trim());
-    }
-
-    private boolean dueWithin(String date, int days) {
-        if (date == null || date.isBlank()) {
-            return true;
-        }
-        try {
-            LocalDate due = VpsDateFormat.parse(date);
-            LocalDate now = LocalDate.now();
-            return !due.isBefore(now) && !due.isAfter(now.plusDays(days));
-        } catch (DateTimeParseException e) {
-            return true;
-        }
     }
 
     private String formatPrice(SessionInfo info) {

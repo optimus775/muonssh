@@ -54,4 +54,20 @@ public class VikunjaClientTest extends TestCase {
         assertEquals(-172800, payload.get("reminders").get(0).get("relative_period").asInt());
         assertTrue(payload.get("description").asText().contains("Hourly rate: 0.01 USD"));
     }
+
+    public void testBuildPaymentPayloadWithoutProviderUsesOnlyServerName() {
+        SessionInfo info = new SessionInfo();
+        info.setName("server-without-provider");
+        info.setHost("203.0.113.7");
+        info.setBillingCycle("monthly");
+        info.setNextPaymentDate("2026-09-01");
+
+        Settings settings = new Settings();
+        settings.setVikunjaProjectId(42);
+
+        ObjectNode payload = new VikunjaClient().buildPaymentTaskPayload(info, settings);
+
+        assertEquals("server-without-provider", payload.get("title").asText());
+        assertFalse(payload.get("description").asText().contains("Provider:"));
+    }
 }

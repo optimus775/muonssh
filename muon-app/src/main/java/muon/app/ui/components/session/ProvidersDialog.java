@@ -27,9 +27,8 @@ public class ProvidersDialog extends JDialog {
     private final DefaultListModel<ProviderRecord> providerModel = new DefaultListModel<>();
     private final JList<ProviderRecord> providerList = new JList<>(providerModel);
     private final JTextField txtName = new SkinnedTextField(24);
+    private final JTextField txtSlug = new SkinnedTextField(24);
     private final JTextField txtWebsite = new SkinnedTextField(24);
-    private final JTextField txtPanelUrl = new SkinnedTextField(24);
-    private final JTextField txtBillingUrl = new SkinnedTextField(24);
     private final JTextField txtAccountId = new SkinnedTextField(24);
     private final JTextField txtTags = new SkinnedTextField(24);
     private final SkinnedTextArea txtNotes = new SkinnedTextArea();
@@ -83,9 +82,8 @@ public class ProvidersDialog extends JDialog {
         form.setBorder(getScaledEmptyBorder(10, 10, 0, 10));
         int row = 0;
         row = addRow(form, row, "Name", txtName);
+        row = addRow(form, row, "Slug", txtSlug);
         row = addRow(form, row, "Website", txtWebsite);
-        row = addRow(form, row, "Panel URL", txtPanelUrl);
-        row = addRow(form, row, "Billing URL", txtBillingUrl);
         row = addRow(form, row, "Account ID", txtAccountId);
         row = addRow(form, row, "Tags", txtTags);
         row = addRow(form, row, "Notes", new SkinnedScrollPane(txtNotes));
@@ -210,9 +208,8 @@ public class ProvidersDialog extends JDialog {
         updatingFields = true;
         try {
             txtName.setText(provider == null ? "" : provider.getName());
+            txtSlug.setText(provider == null ? "" : provider.getSlug());
             txtWebsite.setText(provider == null ? "" : provider.getWebsite());
-            txtPanelUrl.setText(provider == null ? "" : provider.getPanelUrl());
-            txtBillingUrl.setText(provider == null ? "" : provider.getBillingUrl());
             txtAccountId.setText(provider == null ? "" : provider.getAccountId());
             txtTags.setText(provider == null ? "" : provider.getTags());
             txtNotes.setText(provider == null ? "" : provider.getNotes());
@@ -339,6 +336,16 @@ public class ProvidersDialog extends JDialog {
         if (updatingFields) {
             return true;
         }
+        if (txtName.getText().isBlank()) {
+            JOptionPane.showMessageDialog(this, "Provider name can not be empty",
+                    App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        if (txtSlug.getText().isBlank()) {
+            JOptionPane.showMessageDialog(this, "Provider slug can not be empty",
+                    App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
         ProviderRecord provider = createProviderFromFields();
         try {
             current = repository.upsertProvider(provider);
@@ -362,9 +369,8 @@ public class ProvidersDialog extends JDialog {
             provider.setDeleted(current.isDeleted());
         }
         provider.setName(txtName.getText());
+        provider.setSlug(txtSlug.getText());
         provider.setWebsite(txtWebsite.getText());
-        provider.setPanelUrl(txtPanelUrl.getText());
-        provider.setBillingUrl(txtBillingUrl.getText());
         provider.setAccountId(txtAccountId.getText());
         provider.setTags(txtTags.getText());
         provider.setNotes(txtNotes.getText());
@@ -373,9 +379,8 @@ public class ProvidersDialog extends JDialog {
 
     private void addDirtyTracking() {
         addDirtyTracking(txtName);
+        addDirtyTracking(txtSlug);
         addDirtyTracking(txtWebsite);
-        addDirtyTracking(txtPanelUrl);
-        addDirtyTracking(txtBillingUrl);
         addDirtyTracking(txtAccountId);
         addDirtyTracking(txtTags);
         addDirtyTracking(txtNotes);

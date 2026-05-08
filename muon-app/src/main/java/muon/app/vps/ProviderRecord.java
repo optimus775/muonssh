@@ -1,6 +1,7 @@
 package muon.app.vps;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -8,12 +9,12 @@ import java.util.Objects;
 
 @Getter
 @Setter
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ProviderRecord {
     private String id;
     private String name;
+    private String slug;
     private String website;
-    private String panelUrl;
-    private String billingUrl;
     private String accountId;
     private String notes;
     private String tags;

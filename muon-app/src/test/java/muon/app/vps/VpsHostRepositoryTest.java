@@ -9,6 +9,9 @@ import muon.app.ui.components.session.SessionInfo;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 
 public class VpsHostRepositoryTest extends TestCase {
 
@@ -50,7 +53,7 @@ public class VpsHostRepositoryTest extends TestCase {
 
         ProviderRecord provider = new ProviderRecord();
         provider.setName("Hourly Provider");
-        provider.setBillingUrl("https://provider.example/billing");
+        provider.setWebsite("https://provider.example");
         provider = new VpsProviderRepository().upsertProvider(provider);
 
         SessionInfo info = new SessionInfo();
@@ -75,10 +78,104 @@ public class VpsHostRepositoryTest extends TestCase {
         SessionInfo loadedInfo = loaded.getFolder().getItems().get(0);
         assertEquals(provider.getId(), loadedInfo.getProviderId());
         assertEquals("Hourly Provider", loadedInfo.getProvider());
-        assertEquals("https://provider.example/billing", loadedInfo.getProviderUrl());
+        assertEquals("https://provider.example", loadedInfo.getProviderUrl());
         assertEquals("hourly_balance", loadedInfo.getBillingPeriodType());
         assertEquals("0.01", loadedInfo.getHourlyRate());
         assertEquals("2026-06-10", loadedInfo.getNextBalanceCheckDate());
+    }
+
+    public void testMigrationToSchema3DropsLegacyProviderColumnsAndBackfillsSlug() throws Exception {
+        Path configDir = Files.createTempDirectory("vps-ledger-schema3-test");
+        App.getCONTEXT().setConfigDir(configDir.toFile());
+
+        try (Connection connection = VpsDatabaseManager.openConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)");
+            statement.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (2, 1)");
+            statement.execute("CREATE TABLE providers ("
+                    + "id TEXT PRIMARY KEY, "
+                    + "name TEXT NOT NULL, "
+                    + "website TEXT, "
+                    + "panel_url TEXT, "
+                    + "billing_url TEXT, "
+                    + "account_id TEXT, "
+                    + "notes TEXT, "
+                    + "tags TEXT, "
+                    + "updated_at INTEGER NOT NULL, "
+                    + "deleted INTEGER NOT NULL DEFAULT 0"
+                    + ")");
+            statement.execute("CREATE TABLE hosts ("
+                    + "id TEXT PRIMARY KEY, "
+                    + "name TEXT, "
+                    + "host TEXT, "
+                    + "provider TEXT, "
+                    + "provider_url TEXT, "
+                    + "account_id TEXT, "
+                    + "billing_cycle TEXT, "
+                    + "billing_cycle_days INTEGER, "
+                    + "price TEXT, "
+                    + "currency TEXT, "
+                    + "next_payment_date TEXT, "
+                    + "cancel_by_date TEXT, "
+                    + "auto_pay INTEGER NOT NULL DEFAULT 0, "
+                    + "status TEXT, "
+                    + "tags TEXT, "
+                    + "description TEXT, "
+                    + "external_refs TEXT, "
+                    + "vikunja_task_id INTEGER, "
+                    + "sync_private_key INTEGER NOT NULL DEFAULT 0, "
+                    + "sync_public_key INTEGER NOT NULL DEFAULT 0, "
+                    + "deleted INTEGER NOT NULL DEFAULT 0, "
+                    + "updated_at INTEGER NOT NULL, "
+                    + "session_json TEXT NOT NULL, "
+                    + "provider_id TEXT, "
+                    + "billing_period_type TEXT, "
+                    + "billing_period_days INTEGER, "
+                    + "hourly_rate TEXT, "
+                    + "next_balance_check_date TEXT"
+                    + ")");
+            statement.execute("INSERT INTO providers(id, name, website, panel_url, billing_url, account_id, notes, tags, updated_at, deleted) "
+                    + "VALUES ('provider-1', 'Provider One', 'https://one.example', 'https://one.example/panel', 'https://one.example/billing', 'acct-1', 'n1', 't1', 10, 0)");
+            statement.execute("INSERT INTO providers(id, name, website, panel_url, billing_url, account_id, notes, tags, updated_at, deleted) "
+                    + "VALUES ('provider-2', 'Provider One', 'https://two.example', 'https://two.example/panel', 'https://two.example/billing', 'acct-2', 'n2', 't2', 11, 1)");
+            statement.execute("INSERT INTO hosts(id, name, host, provider_id, provider, provider_url, billing_cycle, billing_cycle_days, price, currency, "
+                    + "next_payment_date, auto_pay, status, updated_at, deleted, session_json) "
+                    + "VALUES ('host-1', 'alpha', '192.0.2.10', 'provider-1', 'Provider One', 'https://one.example', 'monthly', 30, '5', 'USD', '2026-06-01', 0, 'active', 10, 0, '{}')");
+        }
+
+        VpsDatabaseManager.migrate();
+
+        try (Connection connection = VpsDatabaseManager.openConnection();
+             Statement statement = connection.createStatement()) {
+            try (ResultSet columns = statement.executeQuery("PRAGMA table_info(providers)")) {
+                boolean hasSlug = false;
+                while (columns.next()) {
+                    String columnName = columns.getString("name");
+                    assertFalse("panel_url".equals(columnName));
+                    assertFalse("billing_url".equals(columnName));
+                    if ("slug".equals(columnName)) {
+                        hasSlug = true;
+                    }
+                }
+                assertTrue(hasSlug);
+            }
+
+            try (ResultSet rs = statement.executeQuery("SELECT slug, website FROM providers WHERE id = 'provider-1'")) {
+                assertTrue(rs.next());
+                assertEquals("provider-one", rs.getString("slug"));
+                assertEquals("https://one.example", rs.getString("website"));
+            }
+
+            try (ResultSet rs = statement.executeQuery("SELECT slug FROM providers WHERE id = 'provider-2'")) {
+                assertTrue(rs.next());
+                assertEquals("provider-one-2", rs.getString("slug"));
+            }
+
+            try (ResultSet rs = statement.executeQuery("SELECT provider_id FROM hosts WHERE id = 'host-1'")) {
+                assertTrue(rs.next());
+                assertEquals("provider-1", rs.getString("provider_id"));
+            }
+        }
     }
 
     public void testHostJsonDoesNotEmbedSshPassword() throws Exception {

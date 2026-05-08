@@ -1,5 +1,6 @@
 package muon.app.vps;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
@@ -230,7 +231,9 @@ public class InfisicalSyncService {
                 return;
             }
 
-            InfisicalAppState remoteState = objectMapper.readValue(remoteJson, InfisicalAppState.class);
+            JsonNode remoteRoot = objectMapper.readTree(remoteJson);
+            boolean legacyProviderPayload = hasLegacyProviderPayload(remoteRoot.path("providers"));
+            InfisicalAppState remoteState = objectMapper.treeToValue(remoteRoot, InfisicalAppState.class);
             long remoteUpdatedAt = remoteState == null ? 0L : remoteState.getUpdatedAt();
             if (remoteUpdatedAt > localUpdatedAt) {
                 if (blockingEditors.get() > 0) {
@@ -239,6 +242,9 @@ public class InfisicalSyncService {
                     return;
                 }
                 applyRemoteState(remoteState);
+                if (legacyProviderPayload) {
+                    hostRepository.saveAppStateValue(LOCAL_STATE_UPDATED_AT_KEY, String.valueOf(System.currentTimeMillis()));
+                }
                 updateLastSyncStatus();
                 return;
             }
@@ -299,6 +305,25 @@ public class InfisicalSyncService {
             resolved = Math.max(resolved, provider.getUpdatedAt());
         }
         return resolved > 0 ? resolved : System.currentTimeMillis();
+    }
+
+    private boolean hasLegacyProviderPayload(JsonNode providersNode) {
+        if (providersNode == null || !providersNode.isArray()) {
+            return false;
+        }
+        for (JsonNode providerNode : providersNode) {
+            if (providerNode == null || providerNode.isNull()) {
+                continue;
+            }
+            if (providerNode.has("panelUrl") || providerNode.has("billingUrl")
+                    || providerNode.has("panel_url") || providerNode.has("billing_url")) {
+                return true;
+            }
+            if (providerNode.path("slug").asText("").isBlank()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private SavedSessionTree prepareRemoteTree(InfisicalAppState remoteState) {

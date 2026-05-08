@@ -7,6 +7,7 @@ import muon.app.ui.components.common.SkinnedTextArea;
 import muon.app.ui.components.common.SkinnedTextField;
 import muon.app.ui.components.common.TabbedPanel;
 import muon.app.util.enums.JumpType;
+import muon.app.vps.VpsBillingDates;
 import muon.app.vps.ProviderRecord;
 import muon.app.vps.VpsDateFormat;
 import muon.app.vps.VpsProviderRepository;
@@ -265,10 +266,6 @@ public class SessionInfoPanel extends JPanel {
             return;
         }
         String selectedId = info == null ? null : info.getProviderId();
-        ProviderRecord selected = getSelectedProvider();
-        if ((selectedId == null || selectedId.isBlank()) && selected != null) {
-            selectedId = selected.getId();
-        }
         providerModel.removeAllElements();
         ProviderRecord empty = new ProviderRecord();
         providerModel.addElement(empty);
@@ -287,13 +284,14 @@ public class SessionInfoPanel extends JPanel {
         cmbProvider = new JComboBox<>(providerModel);
         reloadProviders();
         cmbProvider.addActionListener(e -> {
-            if (info != null) {
-                ProviderRecord provider = getSelectedProvider();
-                info.setProviderId(provider == null ? null : provider.getId());
-                info.setProvider(provider == null ? null : provider.getName());
-                info.setProviderUrl(provider == null ? null : firstNonBlank(provider.getBillingUrl(), provider.getWebsite()));
-                touchAndNotify();
+            if (info == null || suppressChangeEvents) {
+                return;
             }
+            ProviderRecord provider = getSelectedProvider();
+            info.setProviderId(provider == null ? null : provider.getId());
+            info.setProvider(provider == null ? null : provider.getName());
+            info.setProviderUrl(provider == null ? null : provider.getWebsite());
+            touchAndNotify();
         });
         inpAccountId = new SkinnedTextField(10);
         bindText(inpAccountId, value -> info.setAccountId(value));
@@ -311,21 +309,27 @@ public class SessionInfoPanel extends JPanel {
 
         cmbBillingCycle = new JComboBox<>(new String[]{"monthly", "yearly"});
         cmbBillingCycle.addActionListener(e -> {
-            if (info != null && radBillingPeriod.isSelected()) {
-                info.setBillingCycle((String) cmbBillingCycle.getSelectedItem());
-                applyPeriodDaysFromCycle();
-                touchAndNotify();
+            if (info == null || suppressChangeEvents || !radBillingPeriod.isSelected()) {
+                return;
             }
+            info.setBillingCycle((String) cmbBillingCycle.getSelectedItem());
+            applyPeriodDaysFromCycle();
+            applyCalculatedNextPaymentDate();
+            clearHourlyBillingDates();
+            touchAndNotify();
         });
         billingCycleDaysModel = new SpinnerNumberModel(30, 1, 3650, 1);
         billingCycleDaysModel.addChangeListener(e -> {
-            if (info != null && radBillingDays.isSelected()) {
-                info.setBillingPeriodType("fixed_period");
-                info.setBillingCycle("custom");
-                info.setBillingCycleDays((Integer) billingCycleDaysModel.getValue());
-                info.setBillingPeriodDays((Integer) billingCycleDaysModel.getValue());
-                touchAndNotify();
+            if (info == null || suppressChangeEvents || !radBillingDays.isSelected()) {
+                return;
             }
+            info.setBillingPeriodType("fixed_period");
+            info.setBillingCycle("custom");
+            info.setBillingCycleDays((Integer) billingCycleDaysModel.getValue());
+            info.setBillingPeriodDays((Integer) billingCycleDaysModel.getValue());
+            applyCalculatedNextPaymentDate();
+            clearHourlyBillingDates();
+            touchAndNotify();
         });
 
         inpPrice = new SkinnedTextField(10);
@@ -533,16 +537,6 @@ public class SessionInfoPanel extends JPanel {
         cmbProvider.setSelectedIndex(0);
     }
 
-    private String firstNonBlank(String first, String second) {
-        if (first != null && !first.isBlank()) {
-            return first;
-        }
-        if (second != null && !second.isBlank()) {
-            return second;
-        }
-        return null;
-    }
-
     private void addLabel(JPanel panel, String text, int row, Insets insets) {
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0;
@@ -639,15 +633,23 @@ public class SessionInfoPanel extends JPanel {
             updateBillingModeState();
             return;
         }
-        applyBillingModeToInfo(mode);
+        if (suppressChangeEvents) {
+            updateBillingModeState();
+            return;
+        }
+        applyBillingModeToInfo(mode, true);
         updateBillingModeState();
         touchAndNotify();
     }
 
-    private void applyBillingModeToInfo(String mode) {
+    private void applyBillingModeToInfo(String mode, boolean updateDates) {
         if ("hourly".equals(mode)) {
             info.setBillingPeriodType("hourly_balance");
             info.setBillingCycle("hourly");
+            if (updateDates) {
+                clearFixedBillingDates();
+                clearHourlyBillingDates();
+            }
             return;
         }
 
@@ -657,6 +659,10 @@ public class SessionInfoPanel extends JPanel {
             int days = (Integer) billingCycleDaysModel.getValue();
             info.setBillingCycleDays(days);
             info.setBillingPeriodDays(days);
+            if (updateDates) {
+                clearHourlyBillingDates();
+                applyCalculatedNextPaymentDate();
+            }
             return;
         }
 
@@ -667,6 +673,10 @@ public class SessionInfoPanel extends JPanel {
         }
         info.setBillingCycle(cycle);
         applyPeriodDaysFromCycle();
+        if (updateDates) {
+            clearHourlyBillingDates();
+            applyCalculatedNextPaymentDate();
+        }
     }
 
     private void applyPeriodDaysFromCycle() {
@@ -677,6 +687,41 @@ public class SessionInfoPanel extends JPanel {
         int days = "yearly".equals(cycle) ? 365 : 30;
         info.setBillingCycleDays(days);
         info.setBillingPeriodDays(days);
+    }
+
+    private void applyCalculatedNextPaymentDate() {
+        if (info == null) {
+            return;
+        }
+        String nextPaymentDate = VpsBillingDates.nextFixedDate(info.getBillingCycle(), info.getBillingPeriodDays());
+        setStoredDateField(inpNextPaymentDate, nextPaymentDate, info::setNextPaymentDate);
+    }
+
+    private void clearFixedBillingDates() {
+        if (info == null) {
+            return;
+        }
+        setStoredDateField(inpNextPaymentDate, "", info::setNextPaymentDate);
+        setStoredDateField(inpCancelByDate, "", info::setCancelByDate);
+    }
+
+    private void clearHourlyBillingDates() {
+        if (info == null) {
+            return;
+        }
+        setStoredDateField(inpNextBalanceCheckDate, "", info::setNextBalanceCheckDate);
+    }
+
+    private void setStoredDateField(JTextComponent component, String storageValue, Consumer<String> setter) {
+        String resolvedValue = storageValue == null ? "" : storageValue;
+        setter.accept(resolvedValue);
+        boolean previous = suppressChangeEvents;
+        suppressChangeEvents = true;
+        try {
+            component.setText(VpsDateFormat.toDisplayDate(resolvedValue));
+        } finally {
+            suppressChangeEvents = previous;
+        }
     }
 
     private String resolveBillingMode(SessionInfo info) {
@@ -821,7 +866,7 @@ public class SessionInfoPanel extends JPanel {
         inpTags.setText(info.getTags());
         inpDescription.setText(info.getDescription());
         inpExternalRefs.setText(info.getExternalRefs());
-        applyBillingModeToInfo(billingMode);
+        applyBillingModeToInfo(billingMode, false);
         updateBillingModeState();
     }
 
