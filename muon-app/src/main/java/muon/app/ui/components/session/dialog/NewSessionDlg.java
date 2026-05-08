@@ -437,7 +437,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
                 createNewFolder(parentNode);
                 break;
             case "btnDel":
-                deleteNode();
+                if (deleteNode()) {
+                    save();
+                }
                 break;
             case "btnDup":
                 duplicateNode();
@@ -568,15 +570,15 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         }
     }
 
-    private void deleteNode() {
+    private boolean deleteNode() {
         DefaultMutableTreeNode node = (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
         if (node != null && node.getParent() != null) {
             // guard: do not delete root
             if (node.getUserObject() != null && "Empty_Root".equals(node.getUserObject().toString())) {
-                return;
+                return false;
             }
             if (!confirmDeletion(node)) {
-                return;
+                return false;
             }
             DefaultMutableTreeNode sibling = getSibling(node);
             if (sibling != null) {
@@ -589,7 +591,9 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
                 }
             }
             treeModel.removeNodeFromParent(node);
+            return true;
         }
+        return false;
     }
 
     private boolean confirmDeletion(DefaultMutableTreeNode node) {

@@ -1,2 +1,2 @@
 #!/bin/sh
-java -jar /app/muon/muonssh_3.18.3.jar
+java -jar /app/muon/muonssh_3.18.4.jar

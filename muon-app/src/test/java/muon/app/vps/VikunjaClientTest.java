@@ -11,7 +11,8 @@ public class VikunjaClientTest extends TestCase {
         SessionInfo info = new SessionInfo();
         info.setName("alpha");
         info.setHost("203.0.113.5");
-        info.setProvider("Provider");
+        info.setProvider("Provider 1");
+        info.setBillingCycle("monthly");
         info.setPrice("3.50");
         info.setCurrency("EUR");
         info.setNextPaymentDate("2026-07-15");
@@ -22,12 +23,13 @@ public class VikunjaClientTest extends TestCase {
 
         ObjectNode payload = new VikunjaClient().buildPaymentTaskPayload(info, settings);
 
-        assertEquals("VPS payment: alpha", payload.get("title").asText());
+        assertEquals("Provider 1: alpha", payload.get("title").asText());
         assertEquals(42, payload.get("project_id").asLong());
         assertTrue(payload.get("due_date").asText().startsWith("2026-07-15T09:00"));
+        assertEquals(1, payload.get("repeat_mode").asInt());
         assertEquals(-432000, payload.get("reminders").get(0).get("relative_period").asInt());
         assertEquals("due_date", payload.get("reminders").get(0).get("relative_to").asText());
-        assertTrue(payload.get("description").asText().contains("Provider: Provider"));
+        assertTrue(payload.get("description").asText().contains("Host: 203.0.113.5\n\nProvider: Provider 1"));
     }
 
     public void testBuildHourlyBalancePayload() {
@@ -48,6 +50,7 @@ public class VikunjaClientTest extends TestCase {
 
         assertEquals("Check provider balance: hourly", payload.get("title").asText());
         assertTrue(payload.get("due_date").asText().startsWith("2026-08-20T09:00"));
+        assertNull(payload.get("repeat_mode"));
         assertEquals(-172800, payload.get("reminders").get(0).get("relative_period").asInt());
         assertTrue(payload.get("description").asText().contains("Hourly rate: 0.01 USD"));
     }

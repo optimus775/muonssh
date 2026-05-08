@@ -77,12 +77,16 @@ public class VikunjaClient {
         ZonedDateTime dueAt = ZonedDateTime.of(dueDate, LocalTime.of(9, 0), ZoneId.systemDefault());
 
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("title", (hourlyBalance ? "Check provider balance: " : "VPS payment: ")
-                + Objects.toString(info.getName(), info.getHost()));
+        payload.put("title", hourlyBalance
+                ? "Check provider balance: " + Objects.toString(info.getName(), info.getHost())
+                : buildProviderTitle(info));
         payload.put("description", buildDescription(info));
         payload.put("project_id", settings.getVikunjaProjectId());
         payload.put("due_date", dueAt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
         payload.put("done", false);
+        if (isMonthlyBilling(info)) {
+            payload.put("repeat_mode", 1);
+        }
 
         int reminderDays = Math.max(0, settings.getVikunjaReminderOffsetDays());
         ArrayNode reminders = objectMapper.createArrayNode();
@@ -97,30 +101,39 @@ public class VikunjaClient {
 
     private String buildDescription(SessionInfo info) {
         StringBuilder sb = new StringBuilder();
-        appendLine(sb, "Host", info.getHost());
-        appendLine(sb, "Provider", info.getProvider());
-        appendLine(sb, "Provider URL", info.getProviderUrl());
-        appendLine(sb, "Account/order", info.getAccountId());
-        appendLine(sb, "Billing mode", info.getBillingPeriodType());
+        appendBlock(sb, "Host", info.getHost());
+        appendBlock(sb, "Provider", info.getProvider());
+        appendBlock(sb, "Provider URL", info.getProviderUrl());
+        appendBlock(sb, "Account/order", info.getAccountId());
+        appendBlock(sb, "Billing mode", info.getBillingPeriodType());
         if ("hourly_balance".equals(info.getBillingPeriodType())) {
-            appendLine(sb, "Hourly rate", formatHourlyRate(info));
-            appendLine(sb, "Next balance check", VpsDateFormat.toDisplayDate(info.getNextBalanceCheckDate()));
+            appendBlock(sb, "Hourly rate", formatHourlyRate(info));
+            appendBlock(sb, "Next balance check", VpsDateFormat.toDisplayDate(info.getNextBalanceCheckDate()));
         } else {
-            appendLine(sb, "Billing cycle", info.getBillingCycle());
+            appendBlock(sb, "Billing cycle", info.getBillingCycle());
             if (info.getBillingPeriodDays() > 0) {
-                appendLine(sb, "Billing period days", Integer.toString(info.getBillingPeriodDays()));
+                appendBlock(sb, "Billing period days", Integer.toString(info.getBillingPeriodDays()));
             }
-            appendLine(sb, "Price", formatPrice(info));
-            appendLine(sb, "Cancel by", VpsDateFormat.toDisplayDate(info.getCancelByDate()));
-            appendLine(sb, "Auto-pay", info.isAutoPay() ? "yes" : "no");
+            appendBlock(sb, "Price", formatPrice(info));
+            appendBlock(sb, "Cancel by", VpsDateFormat.toDisplayDate(info.getCancelByDate()));
+            appendBlock(sb, "Auto-pay", info.isAutoPay() ? "yes" : "no");
         }
-        appendLine(sb, "Status", info.getVpsStatus());
-        appendLine(sb, "Tags", info.getTags());
-        appendLine(sb, "External refs", info.getExternalRefs());
+        appendBlock(sb, "Status", info.getVpsStatus());
+        appendBlock(sb, "Tags", info.getTags());
+        appendBlock(sb, "External refs", info.getExternalRefs());
         if (info.getDescription() != null && !info.getDescription().isBlank()) {
-            sb.append('\n').append(info.getDescription());
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append(info.getDescription());
         }
         return sb.toString();
+    }
+
+    private String buildProviderTitle(SessionInfo info) {
+        String provider = firstNonBlank(info.getProvider(), "Provider");
+        String name = firstNonBlank(info.getName(), info.getHost());
+        return provider + ": " + Objects.toString(name, "");
     }
 
     private String formatPrice(SessionInfo info) {
@@ -145,10 +158,29 @@ public class VikunjaClient {
         }
     }
 
-    private void appendLine(StringBuilder sb, String label, String value) {
+    private boolean isMonthlyBilling(SessionInfo info) {
+        return info != null
+                && !"hourly_balance".equals(info.getBillingPeriodType())
+                && "monthly".equalsIgnoreCase(Objects.toString(info.getBillingCycle(), ""));
+    }
+
+    private void appendBlock(StringBuilder sb, String label, String value) {
         if (value != null && !value.isBlank()) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
             sb.append(label).append(": ").append(value).append('\n');
         }
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return null;
     }
 
     private String trimTrailingSlash(String value) {
