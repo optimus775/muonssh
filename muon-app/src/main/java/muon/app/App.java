@@ -15,6 +15,7 @@ import muon.app.ui.components.settings.SettingsPageName;
 import muon.app.util.PlatformUtils;
 import muon.app.util.enums.ConflictAction;
 import muon.app.vps.InfisicalSyncService;
+import muon.app.vps.ProfileMigrationCoordinator;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import javax.swing.*;
@@ -94,6 +95,10 @@ public final class App {
         UIManager.setLookAndFeel(CONTEXT.updateSkin().getLaf());
 
         validateMaxKeySize();
+
+        if (!new ProfileMigrationCoordinator().runIfNeeded()) {
+            System.exit(0);
+        }
 
         mw = new AppWindow();
         infisicalSyncService = new InfisicalSyncService();

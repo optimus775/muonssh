@@ -46,8 +46,32 @@ public class LinuxSecretServiceStore implements SecretStore {
     @Override
     public char[] get(String alias) throws Exception {
         try (Client client = new Client()) {
-            List<ObjectPath> items = client.findItems(alias);
+            SearchResult result = client.findItems(alias, true);
+            List<ObjectPath> items = result.items();
             for (ObjectPath itemPath : items) {
+                Item item = new Item(itemPath, client.service);
+                Secret secret = item.getSecret(client.service.getSession().getPath());
+                if (secret == null) {
+                    continue;
+                }
+                try {
+                    return client.transport.decrypt(secret);
+                } finally {
+                    secret.clear();
+                }
+            }
+            return null;
+        }
+    }
+
+    @Override
+    public char[] getWithoutPrompt(String alias) throws Exception {
+        try (Client client = new Client()) {
+            SearchResult result = client.findItems(alias, false);
+            if (result.items().isEmpty() && result.locked()) {
+                throw new SecretStoreLockedException("Secret Service is locked");
+            }
+            for (ObjectPath itemPath : result.items()) {
                 Item item = new Item(itemPath, client.service);
                 Secret secret = item.getSecret(client.service.getSession().getPath());
                 if (secret == null) {
@@ -79,12 +103,46 @@ public class LinuxSecretServiceStore implements SecretStore {
     }
 
     @Override
+    public void setWithoutPrompt(String alias, char[] secret) throws Exception {
+        if (secret == null || secret.length == 0) {
+            deleteWithoutPrompt(alias);
+            return;
+        }
+        try (Client client = new Client()) {
+            if (client.collection.isLocked()) {
+                throw new SecretStoreLockedException("Secret Service is locked");
+            }
+            Map<String, Variant> properties = Item.createProperties("MuonSSH " + alias, attributes(alias));
+            try (Secret encrypted = client.transport.encrypt(CharBuffer.wrap(secret))) {
+                client.collection.createItem(properties, encrypted, true);
+            }
+        }
+    }
+
+    @Override
     public void delete(String alias) throws Exception {
         try (Client client = new Client()) {
-            for (ObjectPath itemPath : client.findItems(alias)) {
+            for (ObjectPath itemPath : client.findItems(alias, true).items()) {
                 Item item = new Item(itemPath, client.service);
                 ObjectPath prompt = item.delete();
                 client.performPrompt(prompt);
+            }
+        }
+    }
+
+    @Override
+    public void deleteWithoutPrompt(String alias) throws Exception {
+        try (Client client = new Client()) {
+            SearchResult result = client.findItems(alias, false);
+            if (result.items().isEmpty() && result.locked()) {
+                throw new SecretStoreLockedException("Secret Service is locked");
+            }
+            for (ObjectPath itemPath : result.items()) {
+                Item item = new Item(itemPath, client.service);
+                ObjectPath prompt = item.delete();
+                if (prompt != null && !"/".equals(prompt.getPath())) {
+                    throw new SecretStoreLockedException("Secret Service requires a prompt");
+                }
             }
         }
     }
@@ -122,20 +180,25 @@ public class LinuxSecretServiceStore implements SecretStore {
             }
         }
 
-        private List<ObjectPath> findItems(String alias) {
+        private SearchResult findItems(String alias, boolean allowUnlock) {
             Pair<List<ObjectPath>, List<ObjectPath>> result = service.searchItems(attributes(alias));
             List<ObjectPath> items = new ArrayList<>();
+            boolean locked = false;
             if (result == null) {
-                return items;
+                return new SearchResult(items, false);
             }
             if (result.a != null) {
                 items.addAll(result.a);
             }
             if (result.b != null && !result.b.isEmpty()) {
-                unlock(result.b);
-                items.addAll(result.b);
+                if (allowUnlock) {
+                    unlock(result.b);
+                    items.addAll(result.b);
+                } else {
+                    locked = true;
+                }
             }
-            return items;
+            return new SearchResult(items, locked);
         }
 
         private void unlockDefaultCollection() {
@@ -177,6 +240,24 @@ public class LinuxSecretServiceStore implements SecretStore {
                     connection.close();
                 }
             }
+        }
+    }
+
+    private static final class SearchResult {
+        private final List<ObjectPath> items;
+        private final boolean locked;
+
+        private SearchResult(List<ObjectPath> items, boolean locked) {
+            this.items = items;
+            this.locked = locked;
+        }
+
+        private List<ObjectPath> items() {
+            return items;
+        }
+
+        private boolean locked() {
+            return locked;
         }
     }
 }

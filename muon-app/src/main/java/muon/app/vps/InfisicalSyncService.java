@@ -98,6 +98,32 @@ public class InfisicalSyncService {
         requestSync("manual");
     }
 
+    public void pushLocalStateNow(long localUpdatedAt) throws Exception {
+        Settings settings = App.getGlobalSettings();
+        if (!isConfigured(settings)) {
+            throw new IllegalStateException("Configure Infisical base URL, project ID, environment and client ID first");
+        }
+
+        PasswordStore passwordStore = PasswordStore.getSharedInstance();
+        if (!passwordStore.unlockLegacySecretsIfNeeded()) {
+            throw new IllegalStateException("Unlock the saved session secrets before running the initial Infisical push");
+        }
+        SecretReadResult secretResult = passwordStore.getSecretWithoutPrompt(InfisicalClient.CLIENT_SECRET_ALIAS);
+        if (secretResult.getStatus() == SecretReadStatus.LOCKED) {
+            throw new IllegalStateException("Unlock the saved secrets before running the initial Infisical push");
+        }
+        if (secretResult.getValue() == null || secretResult.getValue().isBlank()) {
+            throw new IllegalStateException("Infisical client secret is empty");
+        }
+
+        String token = infisicalClient.login(settings, secretResult.getValue());
+        try {
+            pushLocalState(settings, token, localUpdatedAt);
+        } catch (LockedSecretsException e) {
+            throw new IllegalStateException("Unlock the saved session secrets before running the initial Infisical push", e);
+        }
+    }
+
     public void notifyLocalStateChanged() {
         hostRepository.saveAppStateValue(LOCAL_STATE_UPDATED_AT_KEY, String.valueOf(System.currentTimeMillis()));
         requestSync("local-change");

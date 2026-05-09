@@ -22,12 +22,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
 public class VpsHostRepository {
+    private static final String TECHNICAL_ROOT_NAME = "Empty_Root";
 
     private final ObjectMapper objectMapper;
     private final VpsProviderRepository providerRepository;
@@ -45,6 +47,7 @@ public class VpsHostRepository {
             importLegacyJsonIfNeeded();
             SavedSessionTree tree = readTreeFromDatabase();
             if (tree != null) {
+                normalizeTechnicalRoot(tree);
                 return tree;
             }
         } catch (Exception e) {
@@ -54,12 +57,16 @@ public class VpsHostRepository {
     }
 
     public synchronized void saveTree(SessionFolder folder, String lastSelectionPath) throws IOException {
+        saveTree(folder, lastSelectionPath, true);
+    }
+
+    synchronized void saveTree(SessionFolder folder, String lastSelectionPath, boolean hydrateProviders) throws IOException {
         try {
             VpsDatabaseManager.migrate();
             try (Connection connection = VpsDatabaseManager.openConnection()) {
                 connection.setAutoCommit(false);
                 try {
-                    writeTree(connection, folder, lastSelectionPath);
+                    writeTree(connection, folder, lastSelectionPath, hydrateProviders);
                     connection.commit();
                 } catch (Exception e) {
                     connection.rollback();
@@ -87,7 +94,7 @@ public class VpsHostRepository {
                 connection.setAutoCommit(false);
                 try {
                     providerRepository.replaceProviders(connection, providers);
-                    writeTree(connection, snapshotTree.getFolder(), snapshotTree.getLastSelection());
+                    writeTree(connection, snapshotTree.getFolder(), snapshotTree.getLastSelection(), false);
                     saveState(connection, "infisical_local_state_updated_at", String.valueOf(localStateUpdatedAt));
                     connection.commit();
                 } catch (Exception e) {
@@ -184,6 +191,33 @@ public class VpsHostRepository {
         }
     }
 
+    public synchronized void rebuildFromLegacyJson(File legacyFile) throws IOException {
+        SavedSessionTree legacyTree = loadLegacyTree(legacyFile);
+        if (legacyFile != null) {
+            backupLegacyFile(legacyFile);
+        }
+        try {
+            VpsDatabaseManager.migrate();
+            try (Connection connection = VpsDatabaseManager.openConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    providerRepository.replaceProviders(connection, Collections.emptyList());
+                    writeTree(connection, legacyTree.getFolder(), legacyTree.getLastSelection(), false);
+                    connection.commit();
+                } catch (Exception e) {
+                    connection.rollback();
+                    throw e;
+                } finally {
+                    connection.setAutoCommit(true);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IOException("Unable to rebuild VPS Ledger database from legacy JSON", e);
+        } catch (Exception e) {
+            throw new IOException("Unable to rebuild VPS Ledger data from legacy JSON", e);
+        }
+    }
+
     private void importLegacyJsonIfNeeded() throws Exception {
         try (Connection connection = VpsDatabaseManager.openConnection();
              Statement statement = connection.createStatement();
@@ -200,13 +234,8 @@ public class VpsHostRepository {
         }
 
         log.info("Importing legacy session-store.json into VPS Ledger SQLite database");
-        SavedSessionTree legacyTree = objectMapper.readValue(SessionStore.preprocessJson(legacyFile), new TypeReference<>() {
-        });
-        if (legacyTree.getFolder() == null) {
-            legacyTree = createDefaultTree();
-        }
-        ensureIds(legacyTree.getFolder());
-        saveTree(legacyTree.getFolder(), legacyTree.getLastSelection());
+        SavedSessionTree legacyTree = loadLegacyTree(legacyFile);
+        saveTree(legacyTree.getFolder(), legacyTree.getLastSelection(), false);
         backupLegacyFile(legacyFile);
     }
 
@@ -222,6 +251,19 @@ public class VpsHostRepository {
         }
     }
 
+    private SavedSessionTree loadLegacyTree(File legacyFile) throws IOException {
+        if (legacyFile == null || !legacyFile.exists()) {
+            return createDefaultTree();
+        }
+        SavedSessionTree legacyTree = objectMapper.readValue(SessionStore.preprocessJson(legacyFile), new TypeReference<>() {
+        });
+        if (legacyTree.getFolder() == null) {
+            legacyTree = createDefaultTree();
+        }
+        ensureIds(legacyTree.getFolder());
+        return legacyTree;
+    }
+
     private SavedSessionTree readTreeFromDatabase() throws Exception {
         try (Connection connection = VpsDatabaseManager.openConnection()) {
             List<SessionFolder> roots = readFolders(connection, null);
@@ -233,6 +275,25 @@ public class VpsHostRepository {
             tree.setLastSelection(readState(connection, "last_selection"));
             return tree;
         }
+    }
+
+    private void normalizeTechnicalRoot(SavedSessionTree tree) {
+        if (tree == null || tree.getFolder() == null) {
+            return;
+        }
+        SessionFolder root = tree.getFolder();
+        if (!isTechnicalRoot(root)) {
+            return;
+        }
+        if (root.getFolders().size() == 1) {
+            tree.setFolder(root.getFolders().get(0));
+        }
+    }
+
+    private boolean isTechnicalRoot(SessionFolder folder) {
+        return folder != null
+                && TECHNICAL_ROOT_NAME.equals(folder.getName())
+                && folder.getItems().isEmpty();
     }
 
     private List<SessionFolder> readFolders(Connection connection, String parentId) throws Exception {
@@ -319,13 +380,13 @@ public class VpsHostRepository {
         }
     }
 
-    private void writeTree(Connection connection, SessionFolder folder, String lastSelectionPath) throws Exception {
+    private void writeTree(Connection connection, SessionFolder folder, String lastSelectionPath, boolean hydrateProviders) throws Exception {
         clearTreeTables(connection);
-        saveFolder(connection, null, folder, 0);
+        saveFolder(connection, null, folder, 0, hydrateProviders);
         saveState(connection, "last_selection", lastSelectionPath);
     }
 
-    private void saveFolder(Connection connection, String parentId, SessionFolder folder, int position) throws Exception {
+    private void saveFolder(Connection connection, String parentId, SessionFolder folder, int position, boolean hydrateProviders) throws Exception {
         if (folder.getId() == null || folder.getId().isEmpty()) {
             folder.setId(UUID.randomUUID().toString());
         }
@@ -346,7 +407,7 @@ public class VpsHostRepository {
                 info.setId(UUID.randomUUID().toString());
                 info.setUpdatedAt(System.currentTimeMillis());
             }
-            upsertHost(connection, info);
+            upsertHost(connection, info, hydrateProviders);
             try (PreparedStatement statement = connection.prepareStatement(
                     "INSERT INTO folder_hosts(folder_id, host_id, position) VALUES (?, ?, ?)")) {
                 statement.setString(1, folder.getId());
@@ -358,12 +419,20 @@ public class VpsHostRepository {
 
         int folderPosition = 0;
         for (SessionFolder child : folder.getFolders()) {
-            saveFolder(connection, folder.getId(), child, folderPosition++);
+            saveFolder(connection, folder.getId(), child, folderPosition++, hydrateProviders);
         }
     }
 
     private void upsertHost(Connection connection, SessionInfo info) throws Exception {
-        hydrateProviderId(connection, info);
+        upsertHost(connection, info, true);
+    }
+
+    private void upsertHost(Connection connection, SessionInfo info, boolean hydrateProviders) throws Exception {
+        if (hydrateProviders) {
+            hydrateProviderId(connection, info);
+        } else {
+            info.setProviderId(null);
+        }
         if (info.getBillingPeriodType() == null || info.getBillingPeriodType().isBlank()) {
             info.setBillingPeriodType("fixed_period");
         }

@@ -9,7 +9,10 @@ import muon.app.common.settings.Settings;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -129,6 +132,33 @@ public class InfisicalClientTest extends TestCase {
             fail("Expected UnsupportedApiVersionException");
         } catch (InfisicalClient.UnsupportedApiVersionException expected) {
             assertTrue(expected.getMessage().contains("latest secrets API"));
+        }
+    }
+
+    public void testLoginTimesOutWhenServerStopsResponding() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/v1/auth/universal-auth/login", exchange -> {
+            try {
+                Thread.sleep(1000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            respondJson(exchange, 200, "{\"accessToken\":\"token\"}");
+        });
+        server.start();
+
+        InfisicalClient client = new InfisicalClient(HttpClient.newHttpClient(),
+                                                     new ObjectMapper(),
+                                                     Duration.ofMillis(100));
+        Settings settings = createSettings();
+        settings.setInfisicalBaseUrl("http://localhost:" + server.getAddress().getPort());
+        settings.setInfisicalClientId("client-123");
+
+        try {
+            client.login(settings, "client-secret");
+            fail("Expected HttpTimeoutException");
+        } catch (HttpTimeoutException expected) {
+            assertNotNull(expected.getMessage());
         }
     }
 

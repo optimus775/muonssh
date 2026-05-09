@@ -13,23 +13,34 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 public class InfisicalClient {
 
     public static final String CLIENT_SECRET_ALIAS = SecretAliases.INFISICAL_CLIENT_SECRET;
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final Duration requestTimeout;
 
     public InfisicalClient() {
-        this(HttpClient.newHttpClient(), new ObjectMapper());
+        this(HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build(),
+             new ObjectMapper(),
+             REQUEST_TIMEOUT);
     }
 
     InfisicalClient(HttpClient httpClient, ObjectMapper objectMapper) {
+        this(httpClient, objectMapper, REQUEST_TIMEOUT);
+    }
+
+    InfisicalClient(HttpClient httpClient, ObjectMapper objectMapper, Duration requestTimeout) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
+        this.requestTimeout = requestTimeout == null ? REQUEST_TIMEOUT : requestTimeout;
     }
 
     public String login(Settings settings, String clientSecret) throws IOException, InterruptedException {
@@ -40,7 +51,8 @@ public class InfisicalClient {
             body.put("organizationSlug", settings.getInfisicalOrganizationSlug());
         }
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(trimTrailingSlash(settings.getInfisicalBaseUrl()) + "/api/v1/auth/universal-auth/login"))
+        HttpRequest request = requestBuilder(URI.create(trimTrailingSlash(settings.getInfisicalBaseUrl())
+                + "/api/v1/auth/universal-auth/login"))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
@@ -74,6 +86,7 @@ public class InfisicalClient {
                 + "&secretPath=" + encode(normalizePath(secretPath))
                 + "&type=shared&viewSecretValue=true&expandSecretReferences=false&includeImports=false");
         HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(uri)
+                                                               .timeout(requestTimeout)
                                                                .header("Authorization", "Bearer " + accessToken)
                                                                .GET()
                                                                .build(),
@@ -113,6 +126,7 @@ public class InfisicalClient {
                 + "&path=" + encode(parentPath)
                 + "&recursive=false");
         HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(uri)
+                                                               .timeout(requestTimeout)
                                                                .header("Authorization", "Bearer " + accessToken)
                                                                .GET()
                                                                .build(),
@@ -144,7 +158,7 @@ public class InfisicalClient {
         body.put("path", normalizePath(parentPath));
 
         URI uri = URI.create(trimTrailingSlash(settings.getInfisicalBaseUrl()) + "/api/v2/folders");
-        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(uri)
+        HttpResponse<String> response = httpClient.send(requestBuilder(uri)
                                                                .header("Authorization", "Bearer " + accessToken)
                                                                .header("Content-Type", "application/json")
                                                                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
@@ -166,7 +180,7 @@ public class InfisicalClient {
         body.put("type", "shared");
 
         URI uri = URI.create(trimTrailingSlash(settings.getInfisicalBaseUrl()) + "/api/v4/secrets/" + encode(secretName));
-        return httpClient.send(HttpRequest.newBuilder(uri)
+        return httpClient.send(requestBuilder(uri)
                                        .header("Authorization", "Bearer " + accessToken)
                                        .header("Content-Type", "application/json")
                                        .method(method, HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
@@ -243,6 +257,10 @@ public class InfisicalClient {
             value = value.substring(0, value.length() - 1);
         }
         return value;
+    }
+
+    private HttpRequest.Builder requestBuilder(URI uri) {
+        return HttpRequest.newBuilder(uri).timeout(requestTimeout);
     }
 
     public static class UnsupportedApiVersionException extends IOException {

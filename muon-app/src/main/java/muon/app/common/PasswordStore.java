@@ -5,6 +5,7 @@ import muon.app.App;
 import muon.app.common.secrets.LegacyPkcs12SecretStore;
 import muon.app.common.secrets.LinuxSecretServiceStore;
 import muon.app.common.secrets.SecretAliases;
+import muon.app.common.secrets.SecretStoreLockedException;
 import muon.app.common.secrets.SecretStore;
 import muon.app.common.secrets.SessionSecretStore;
 import muon.app.common.secrets.WindowsCredentialStore;
@@ -12,6 +13,7 @@ import muon.app.ui.components.session.HopEntry;
 import muon.app.ui.components.session.SavedSessionTree;
 import muon.app.ui.components.session.SessionFolder;
 import muon.app.ui.components.session.SessionInfo;
+import muon.app.util.Constants;
 import muon.app.util.OptionPaneUtils;
 
 import javax.swing.JOptionPane;
@@ -20,7 +22,17 @@ import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -30,6 +42,8 @@ import static muon.app.util.PlatformUtils.IS_WINDOWS;
 
 @Slf4j
 public final class PasswordStore {
+
+    private static final DateTimeFormatter LEGACY_BACKUP_SUFFIX = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
     public enum SecretReadStatus {
         FOUND,
@@ -59,7 +73,13 @@ public final class PasswordStore {
         boolean shouldUseLegacyFallback(String backendName);
     }
 
+    @FunctionalInterface
+    public interface PrimaryStoreFactory {
+        SecretStore create() throws Exception;
+    }
+
     private static PasswordStore instance;
+    private static PrimaryStoreFactory primaryStoreFactory = PasswordStore::createPlatformPrimaryStore;
 
     private final File configDir;
     private final LegacyPkcs12SecretStore legacyStore;
@@ -71,6 +91,7 @@ public final class PasswordStore {
     private boolean migrationAttempted;
     private boolean migrationDeletePromptShown;
     private boolean plaintextScrubNeeded;
+    private Boolean legacyAccessEnabled;
 
     private PasswordStore(File configDir) throws Exception {
         this.configDir = configDir;
@@ -83,6 +104,20 @@ public final class PasswordStore {
             instance = new PasswordStore(currentConfigDir);
         }
         return instance;
+    }
+
+    public static synchronized void setPrimaryStoreFactoryForTests(PrimaryStoreFactory factory) {
+        primaryStoreFactory = factory == null ? PasswordStore::createPlatformPrimaryStore : factory;
+        if (instance != null) {
+            instance.primaryStore = null;
+            instance.writeFallbackStore = null;
+            instance.primaryStoreChecked = false;
+        }
+    }
+
+    public static synchronized void resetForTests() {
+        primaryStoreFactory = PasswordStore::createPlatformPrimaryStore;
+        instance = null;
     }
 
     public synchronized void setFallbackDecisionProvider(FallbackDecisionProvider fallbackDecisionProvider) {
@@ -109,6 +144,10 @@ public final class PasswordStore {
         return expectedSystemBackendName();
     }
 
+    public synchronized String expectedSystemStoreBackendName() {
+        return expectedSystemBackendName();
+    }
+
     public synchronized void unlockStore(char[] password) throws Exception {
         legacyStore.unlock(password);
     }
@@ -127,12 +166,16 @@ public final class PasswordStore {
 
     public synchronized SecretReadResult getSecretWithoutPrompt(String alias) {
         SecretStore primary = getPrimaryStore();
+        boolean primaryLocked = false;
         if (primary != null) {
             try {
-                char[] value = primary.get(alias);
+                char[] value = primary.getWithoutPrompt(alias);
                 if (value != null) {
                     return toSecretReadResult(value, SecretReadStatus.FOUND);
                 }
+            } catch (SecretStoreLockedException e) {
+                primaryLocked = true;
+                log.info("{} is locked while reading {} without prompting", primary.backendName(), alias);
             } catch (Exception e) {
                 log.error("Unable to read secret {} from {}", alias, primary.backendName(), e);
             }
@@ -143,7 +186,7 @@ public final class PasswordStore {
             return toSecretReadResult(sessionValue, SecretReadStatus.FOUND);
         }
 
-        if (legacyStore.isUnlocked()) {
+        if (isLegacyAccessEnabled() && legacyStore.isUnlocked()) {
             try {
                 char[] value = legacyStore.get(alias);
                 if (value != null) {
@@ -159,7 +202,11 @@ public final class PasswordStore {
             } catch (Exception e) {
                 log.error("Unable to read secret {} from legacy store", alias, e);
             }
-        } else if (legacyStore.exists()) {
+        } else if (isLegacyAccessEnabled() && legacyStore.exists()) {
+            return new SecretReadResult(null, SecretReadStatus.LOCKED);
+        }
+
+        if (primaryLocked) {
             return new SecretReadResult(null, SecretReadStatus.LOCKED);
         }
 
@@ -172,8 +219,34 @@ public final class PasswordStore {
     }
 
     public synchronized void saveSecretWithoutPrompt(String alias, String value) throws Exception {
+        SecretStore primary = getPrimaryStore();
+        if (primary != null) {
+            try {
+                saveSecret(primary, alias, value, false);
+                return;
+            } catch (SecretStoreLockedException e) {
+                log.info("{} is locked while saving {} without prompting; using non-interactive fallback",
+                         primary.backendName(),
+                         alias);
+                saveSecret(selectNonInteractiveFallbackStore(), alias, value, false);
+                return;
+            } catch (Exception e) {
+                log.warn("Unable to persist secret {} to {} without prompting; using non-interactive fallback",
+                         alias,
+                         primary.backendName(),
+                         e);
+                saveSecret(selectNonInteractiveFallbackStore(), alias, value, false);
+                return;
+            }
+        }
         SecretStore store = selectWriteStore(false);
-        saveSecret(store, alias, value);
+        saveSecret(store, alias, value, false);
+    }
+
+    public synchronized void saveSecretToSystemStore(String alias, String value) throws Exception {
+        SecretStore primary = requirePrimaryStore();
+        saveSecret(primary, alias, value);
+        validatePrimarySecret(primary, alias, value);
     }
 
     public synchronized void populatePassword(SavedSessionTree savedSessionTree) {
@@ -226,10 +299,60 @@ public final class PasswordStore {
     }
 
     public synchronized boolean changeStorePassword(char[] newPassword) throws Exception {
+        if (!isLegacyAccessEnabled()) {
+            return false;
+        }
         if (!ensureLegacyUnlocked()) {
             return false;
         }
         return legacyStore.changePassword(newPassword);
+    }
+
+    public synchronized boolean unlockLegacySecretsIfNeeded() {
+        if (!isLegacyAccessEnabled()) {
+            return true;
+        }
+        if (!legacyStore.exists() || legacyStore.isUnlocked()) {
+            return true;
+        }
+        return ensureLegacyUnlocked();
+    }
+
+    public synchronized int migrateLegacySecretsToSystemStore(SavedSessionTree savedSessionTree) throws Exception {
+        SecretStore primary = requirePrimaryStore();
+        if (!legacyStore.exists()) {
+            disableLegacyAccessForCurrentProfile();
+            return 0;
+        }
+        if (!ensureLegacyUnlocked()) {
+            throw new IllegalStateException("Unable to unlock passwords.pfx");
+        }
+
+        Map<String, char[]> secretsToMigrate = collectLegacySecretsForSystemStore(savedSessionTree);
+        for (Map.Entry<String, char[]> entry : secretsToMigrate.entrySet()) {
+            primary.set(entry.getKey(), entry.getValue());
+        }
+        validatePrimarySecrets(primary, secretsToMigrate);
+        disableLegacyAccessForCurrentProfile();
+        return secretsToMigrate.size();
+    }
+
+    public synchronized void disableLegacyAccessForCurrentProfile() {
+        legacyAccessEnabled = false;
+        if (writeFallbackStore == legacyStore) {
+            writeFallbackStore = null;
+        }
+    }
+
+    public synchronized String backupLegacyStoreIfPresent() throws Exception {
+        Path source = legacyStore.getStoreFile().toPath();
+        if (!Files.exists(source)) {
+            return null;
+        }
+        String suffix = LEGACY_BACKUP_SUFFIX.format(LocalDateTime.now());
+        Path archived = source.resolveSibling("passwords.pre-" + Constants.APPLICATION_VERSION + "-" + suffix + ".pfx");
+        Files.move(source, archived, StandardCopyOption.REPLACE_EXISTING);
+        return archived.toString();
     }
 
     private void populatePassword(SessionFolder folder) {
@@ -309,31 +432,47 @@ public final class PasswordStore {
     }
 
     private void saveSecret(SecretStore store, String alias, String value) throws Exception {
+        saveSecret(store, alias, value, true);
+    }
+
+    private void saveSecret(SecretStore store, String alias, String value, boolean allowPrompt) throws Exception {
         if (!hasSecretValue(value)) {
-            deleteFromKnownStores(alias);
+            deleteFromKnownStores(alias, allowPrompt);
             return;
         }
         char[] secret = value.toCharArray();
         try {
-            store.set(alias, secret);
+            if (allowPrompt) {
+                store.set(alias, secret);
+            } else {
+                store.setWithoutPrompt(alias, secret);
+            }
         } finally {
             Arrays.fill(secret, '\0');
         }
     }
 
     private void deleteFromKnownStores(String alias) {
-        deleteAliasFromKnownStores(alias);
+        deleteFromKnownStores(alias, true);
+    }
+
+    private void deleteFromKnownStores(String alias, boolean allowPrompt) {
+        deleteAliasFromKnownStores(alias, allowPrompt);
         String legacyAlias = SecretAliases.legacyAliasFor(alias);
         if (legacyAlias != null) {
-            deleteAliasFromKnownStores(legacyAlias);
+            deleteAliasFromKnownStores(legacyAlias, allowPrompt);
         }
     }
 
-    private void deleteAliasFromKnownStores(String alias) {
+    private void deleteAliasFromKnownStores(String alias, boolean allowPrompt) {
         List<SecretStore> stores = List.of(sessionStore);
         for (SecretStore store : stores) {
             try {
-                store.delete(alias);
+                if (allowPrompt) {
+                    store.delete(alias);
+                } else {
+                    store.deleteWithoutPrompt(alias);
+                }
             } catch (Exception e) {
                 log.debug("Unable to delete {} from {}", alias, store.backendName(), e);
             }
@@ -341,14 +480,22 @@ public final class PasswordStore {
         SecretStore primary = getPrimaryStore();
         if (primary != null) {
             try {
-                primary.delete(alias);
+                if (allowPrompt) {
+                    primary.delete(alias);
+                } else {
+                    primary.deleteWithoutPrompt(alias);
+                }
             } catch (Exception e) {
                 log.debug("Unable to delete {} from {}", alias, primary.backendName(), e);
             }
         }
-        if (legacyStore.isUnlocked()) {
+        if (isLegacyAccessEnabled() && legacyStore.isUnlocked()) {
             try {
-                legacyStore.delete(alias);
+                if (allowPrompt) {
+                    legacyStore.delete(alias);
+                } else {
+                    legacyStore.deleteWithoutPrompt(alias);
+                }
             } catch (Exception e) {
                 log.debug("Unable to delete {} from legacy store", alias, e);
             }
@@ -376,7 +523,7 @@ public final class PasswordStore {
                     return value;
                 }
                 String legacyAlias = SecretAliases.legacyAliasFor(alias);
-                if (legacyAlias != null && ensureLegacyUnlockedIfExists()) {
+                if (isLegacyAccessEnabled() && legacyAlias != null && ensureLegacyUnlockedIfExists()) {
                     value = legacyStore.get(legacyAlias);
                     if (value != null) {
                         primary.set(alias, value);
@@ -393,7 +540,7 @@ public final class PasswordStore {
             return sessionValue;
         }
 
-        if (ensureLegacyUnlockedIfExists()) {
+        if (isLegacyAccessEnabled() && ensureLegacyUnlockedIfExists()) {
             try {
                 char[] value = legacyStore.get(alias);
                 if (value != null) {
@@ -414,6 +561,9 @@ public final class PasswordStore {
         }
         migrationAttempted = true;
 
+        if (!isLegacyAccessEnabled()) {
+            return;
+        }
         SecretStore primary = getPrimaryStore();
         if (primary == null || !legacyStore.exists() || !ensureLegacyUnlockedIfExists()) {
             return;
@@ -433,7 +583,7 @@ public final class PasswordStore {
                 copied += migrateSessionLegacyAliases(primary, legacySecrets, savedSessionTree.getFolder());
             }
             if (copied > 0) {
-                promptDeleteLegacyStore();
+                promptBackupLegacyStore();
             }
         } catch (Exception e) {
             log.error("Unable to migrate legacy password store", e);
@@ -473,7 +623,7 @@ public final class PasswordStore {
         return 1;
     }
 
-    private void promptDeleteLegacyStore() {
+    private void promptBackupLegacyStore() {
         if (migrationDeletePromptShown || GraphicsEnvironment.isHeadless()) {
             return;
         }
@@ -481,15 +631,15 @@ public final class PasswordStore {
         SwingUtilities.invokeLater(() -> {
             int result = JOptionPane.showConfirmDialog(
                     App.getAppWindow(),
-                    "Secrets were migrated to the system credential store. Delete the old passwords.pfx file?",
+                    "Secrets were migrated to the system credential store. Move the old passwords.pfx file to a backup file?",
                     "MuonSSH",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE);
             if (result == JOptionPane.YES_OPTION) {
                 try {
-                    Files.deleteIfExists(legacyStore.getStoreFile().toPath());
+                    backupLegacyStoreIfPresent();
                 } catch (Exception e) {
-                    log.error("Unable to delete legacy password store", e);
+                    log.error("Unable to back up legacy password store", e);
                 }
             }
         });
@@ -504,16 +654,16 @@ public final class PasswordStore {
         if (primary != null) {
             return primary;
         }
+        if (writeFallbackStore == legacyStore && !isLegacyAccessEnabled()) {
+            writeFallbackStore = null;
+        }
         if (writeFallbackStore != null) {
             return writeFallbackStore;
         }
         if (!allowPrompt) {
-            if (legacyStore.isUnlocked()) {
-                return legacyStore;
-            }
-            return sessionStore;
+            return selectNonInteractiveFallbackStore();
         }
-        if (fallbackDecisionProvider.shouldUseLegacyFallback(expectedSystemBackendName())) {
+        if (isLegacyAccessEnabled() && fallbackDecisionProvider.shouldUseLegacyFallback(expectedSystemBackendName())) {
             if (!ensureLegacyUnlocked()) {
                 throw new IllegalStateException("Unable to unlock legacy password store");
             }
@@ -522,6 +672,13 @@ public final class PasswordStore {
             writeFallbackStore = sessionStore;
         }
         return writeFallbackStore;
+    }
+
+    private SecretStore selectNonInteractiveFallbackStore() {
+        if (isLegacyAccessEnabled() && legacyStore.isUnlocked()) {
+            return legacyStore;
+        }
+        return sessionStore;
     }
 
     private SecretStore getPrimaryStore() {
@@ -540,12 +697,7 @@ public final class PasswordStore {
 
     private SecretStore createPrimaryStore() {
         try {
-            if (IS_LINUX) {
-                return new LinuxSecretServiceStore();
-            }
-            if (IS_WINDOWS) {
-                return new WindowsCredentialStore();
-            }
+            return primaryStoreFactory.create();
         } catch (Throwable t) {
             log.warn("Unable to initialize system credential store: {}", t.getMessage());
         }
@@ -553,6 +705,9 @@ public final class PasswordStore {
     }
 
     private boolean ensureLegacyUnlockedIfExists() {
+        if (!isLegacyAccessEnabled()) {
+            return false;
+        }
         if (!legacyStore.exists() && !legacyStore.isUnlocked()) {
             return false;
         }
@@ -560,6 +715,9 @@ public final class PasswordStore {
     }
 
     private boolean ensureLegacyUnlocked() {
+        if (!isLegacyAccessEnabled()) {
+            return false;
+        }
         if (legacyStore.isUnlocked()) {
             return true;
         }
@@ -594,6 +752,124 @@ public final class PasswordStore {
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE);
         return result == JOptionPane.YES_OPTION;
+    }
+
+    private SecretStore requirePrimaryStore() throws Exception {
+        SecretStore primary = getPrimaryStore();
+        if (primary == null) {
+            throw new IllegalStateException(expectedSystemBackendName() + " is not available");
+        }
+        return primary;
+    }
+
+    private void validatePrimarySecret(SecretStore primary, String alias, String expectedValue) throws Exception {
+        char[] actual = primary.get(alias);
+        char[] expected = hasSecretValue(expectedValue) ? expectedValue.toCharArray() : null;
+        try {
+            if (!Arrays.equals(actual, expected)) {
+                throw new IllegalStateException("Unable to validate secret in " + primary.backendName() + " for " + alias);
+            }
+        } finally {
+            if (actual != null) {
+                Arrays.fill(actual, '\0');
+            }
+            if (expected != null) {
+                Arrays.fill(expected, '\0');
+            }
+        }
+    }
+
+    private void validatePrimarySecrets(SecretStore primary, Map<String, char[]> expectedSecrets) throws Exception {
+        for (Map.Entry<String, char[]> entry : expectedSecrets.entrySet()) {
+            char[] actual = primary.get(entry.getKey());
+            try {
+                if (!Arrays.equals(actual, entry.getValue())) {
+                    throw new IllegalStateException("Unable to validate migrated secret in "
+                            + primary.backendName() + " for " + entry.getKey());
+                }
+            } finally {
+                if (actual != null) {
+                    Arrays.fill(actual, '\0');
+                }
+            }
+        }
+    }
+
+    private Map<String, char[]> collectLegacySecretsForSystemStore(SavedSessionTree savedSessionTree) {
+        Map<String, char[]> expected = new LinkedHashMap<>();
+        Map<String, char[]> legacySecrets = legacyStore.snapshot();
+        copyLegacyAlias(expected, SecretAliases.VIKUNJA_API_TOKEN, legacySecrets.get(SecretAliases.LEGACY_VIKUNJA_API_TOKEN));
+        copyLegacyAlias(expected, SecretAliases.INFISICAL_CLIENT_SECRET, legacySecrets.get(SecretAliases.LEGACY_INFISICAL_CLIENT_SECRET));
+        copySessionLegacyAliases(expected, legacySecrets, savedSessionTree == null ? null : savedSessionTree.getFolder());
+        for (Map.Entry<String, char[]> entry : legacySecrets.entrySet()) {
+            if (SecretAliases.isCanonicalAlias(entry.getKey())) {
+                copyLegacyAlias(expected, entry.getKey(), entry.getValue());
+            }
+        }
+        return expected;
+    }
+
+    private void copySessionLegacyAliases(Map<String, char[]> target, Map<String, char[]> legacySecrets, SessionFolder folder) {
+        if (folder == null) {
+            return;
+        }
+        for (SessionInfo info : folder.getItems()) {
+            if (info.getId() != null && !info.getId().isBlank()) {
+                copyLegacyAlias(target, SecretAliases.sshPassword(info.getId()), legacySecrets.get(info.getId()));
+            }
+        }
+        for (SessionFolder child : folder.getFolders()) {
+            copySessionLegacyAliases(target, legacySecrets, child);
+        }
+    }
+
+    private void copyLegacyAlias(Map<String, char[]> target, String alias, char[] value) {
+        if (alias == null || value == null || value.length == 0) {
+            return;
+        }
+        target.put(alias, Arrays.copyOf(value, value.length));
+    }
+
+    private boolean isLegacyAccessEnabled() {
+        if (legacyAccessEnabled != null) {
+            return legacyAccessEnabled;
+        }
+        legacyAccessEnabled = !hasCompleted400MigrationMarker();
+        return legacyAccessEnabled;
+    }
+
+    private boolean hasCompleted400MigrationMarker() {
+        Path databasePath = configDir.toPath().resolve(Constants.VPS_LEDGER_DB_FILE);
+        if (!Files.exists(databasePath)) {
+            return false;
+        }
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath.toAbsolutePath());
+             PreparedStatement tableCheck = connection.prepareStatement(
+                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state'");
+             ResultSet tableResult = tableCheck.executeQuery()) {
+            if (!tableResult.next()) {
+                return false;
+            }
+            try (PreparedStatement statement = connection.prepareStatement("SELECT value FROM app_state WHERE key = ?")) {
+                statement.setString(1, Constants.MIGRATION_4_0_0_COMPLETED_AT_KEY);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    return resultSet.next() && !resultSet.getString("value").isBlank();
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("Unable to inspect migration marker in {}: {}", databasePath, e.getMessage());
+            return false;
+        }
+    }
+
+    private static SecretStore createPlatformPrimaryStore() throws Exception {
+        if (IS_LINUX) {
+            return new LinuxSecretServiceStore();
+        }
+        if (IS_WINDOWS) {
+            return new WindowsCredentialStore();
+        }
+        return null;
     }
 
     private String expectedSystemBackendName() {

@@ -98,6 +98,7 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         treeModel = new DefaultTreeModel(null, true);
         treeModel.addTreeModelListener(this);
         tree = new AutoScrollingJTree(treeModel);
+        configureTreePresentation();
         tree.setDragEnabled(true);
         tree.setDropMode(DropMode.ON_OR_INSERT);
         tree.setTransferHandler(new TreeTransferHandler());
@@ -380,6 +381,27 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         return (DefaultMutableTreeNode) treeModel.getRoot();
     }
 
+    private DefaultMutableTreeNode getPersistedRootNode() {
+        DefaultMutableTreeNode root = getTreeRoot();
+        if (root == null) {
+            return null;
+        }
+        Object userObject = root.getUserObject();
+        if (userObject != null
+                && EMPTY_ROOT.equals(userObject.toString())
+                && root.getChildCount() == 1
+                && root.getChildAt(0) instanceof DefaultMutableTreeNode) {
+            return (DefaultMutableTreeNode) root.getChildAt(0);
+        }
+        return root;
+    }
+
+    private void configureTreePresentation() {
+        tree.setCellRenderer(new SessionTreeCellRenderer());
+        tree.setRowHeight(scale(27));
+        tree.putClientProperty("JTree.lineStyle", "None");
+    }
+
     private void sortGroup(boolean ascending) {
         TreePath path = tree.getSelectionPath();
         if (path == null) {
@@ -489,7 +511,7 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
     }
 
     private void showVpsOverview() {
-        SessionFolder folder = SessionStore.convertModelFromTree(rootNode);
+        SessionFolder folder = SessionStore.convertModelFromTree(getPersistedRootNode());
         new VpsOverviewDialog(this, folder).setVisible(true);
     }
 
@@ -706,7 +728,7 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
 
     private void createNewFolder(DefaultMutableTreeNode parentNode) {
         if (parentNode == null) {
-            parentNode = rootNode;
+            parentNode = getPersistedRootNode();
         }
         Object objFolder = parentNode.getUserObject();
         if (objFolder instanceof SessionInfo) {
@@ -725,14 +747,14 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
 
     private void createNewHost(DefaultMutableTreeNode parentNode) {
         if (parentNode == null) {
-            parentNode = rootNode;
+            parentNode = getPersistedRootNode();
         }
         Object obj = parentNode.getUserObject();
         if (obj instanceof SessionInfo) {
             parentNode = (DefaultMutableTreeNode) parentNode.getParent();
         }
 
-        DefaultMutableTreeNode childNode = getNode(parentNode, rootNode, treeModel);
+        DefaultMutableTreeNode childNode = getNode(parentNode, getTreeRoot(), treeModel);
         tree.scrollPathToVisible(new TreePath(childNode.getPath()));
         TreePath path = new TreePath(childNode.getPath());
         tree.clearSelection();
@@ -811,19 +833,19 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
                 NamedItem item = (NamedItem) userObject;
                 id = item.getId();
                 if (id == null || id.isEmpty()) {
-                    id = getNewUuid(rootNode);
+                    id = getNewUuid(getTreeRoot());
                 }
             }
         }
         boolean previousSuppress = suppressTreeEvents;
         suppressTreeEvents = true;
         try {
-            removeInvalidSessionNodes(rootNode);
+            removeInvalidSessionNodes(getTreeRoot());
             sortTreeAndKeepSelection();
         } finally {
             suppressTreeEvents = previousSuppress;
         }
-        SessionStore.save(SessionStore.convertModelFromTree(rootNode), id);
+        SessionStore.save(SessionStore.convertModelFromTree(getPersistedRootNode()), id);
         clearDirty();
     }
 
@@ -1043,6 +1065,55 @@ public class NewSessionDlg extends JDialog implements ActionListener, TreeSelect
         btnConnect.setPreferredSize(scale(new Dimension(width, btnConnect.getPreferredSize().height)));
         btnCancel.setPreferredSize(scale(new Dimension(width, btnCancel.getPreferredSize().height)));
         btnSave.setPreferredSize(scale(new Dimension(width, btnSave.getPreferredSize().height)));
+    }
+
+    private final class SessionTreeCellRenderer extends DefaultTreeCellRenderer {
+        @Override
+        public Component getTreeCellRendererComponent(JTree tree, Object value, boolean selected, boolean expanded,
+                                                      boolean leaf, int row, boolean hasFocus) {
+            super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus);
+            putClientProperty("html.disable", Boolean.TRUE);
+            setFont(App.getCONTEXT().getSkin().getDefaultFont());
+            setOpaque(true);
+            setBorder(getScaledEmptyBorder(4, 4, 4, 4));
+            setText(resolveNodeText(value));
+            setToolTipText(getText());
+            setForeground(selected
+                    ? App.getCONTEXT().getSkin().getDefaultSelectionForeground()
+                    : App.getCONTEXT().getSkin().getDefaultForeground());
+            setBackground(selected
+                    ? App.getCONTEXT().getSkin().getDefaultSelectionBackground()
+                    : UIManager.getColor("Tree.background"));
+            return this;
+        }
+
+        private String resolveNodeText(Object value) {
+            if (!(value instanceof DefaultMutableTreeNode)) {
+                return "";
+            }
+            Object userObject = ((DefaultMutableTreeNode) value).getUserObject();
+            if (userObject instanceof SessionInfo) {
+                SessionInfo sessionInfo = (SessionInfo) userObject;
+                return sanitizeText(firstNonBlank(sessionInfo.getName(), sessionInfo.getHost(), ""));
+            }
+            if (userObject instanceof NamedItem) {
+                return sanitizeText(firstNonBlank(((NamedItem) userObject).getName(), ""));
+            }
+            return sanitizeText(Objects.toString(userObject, ""));
+        }
+
+        private String sanitizeText(String value) {
+            return value == null ? "" : value.replace('\r', ' ').replace('\n', ' ').trim();
+        }
+
+        private String firstNonBlank(String... values) {
+            for (String value : values) {
+                if (value != null && !value.isBlank()) {
+                    return value;
+                }
+            }
+            return "";
+        }
     }
 
     private static final class FolderTarget {

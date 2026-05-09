@@ -178,6 +178,77 @@ public class VpsHostRepositoryTest extends TestCase {
         }
     }
 
+    public void testRebuildFromLegacyJsonKeepsProvidersEmpty() throws Exception {
+        Path configDir = Files.createTempDirectory("vps-ledger-legacy-rebuild");
+        App.getCONTEXT().setConfigDir(configDir.toFile());
+
+        String json = "{"
+                + "\"folder\":{"
+                + "\"id\":\"root-folder\","
+                + "\"name\":\"My sites\","
+                + "\"folders\":[],"
+                + "\"items\":[{"
+                + "\"id\":\"legacy-host\","
+                + "\"name\":\"legacy-vps\","
+                + "\"host\":\"192.0.2.16\","
+                + "\"user\":\"root\","
+                + "\"provider\":\"Legacy Provider\","
+                + "\"providerUrl\":\"https://legacy.example\","
+                + "\"port\":22,"
+                + "\"favouriteRemoteFolders\":[],"
+                + "\"favouriteLocalFolders\":[],"
+                + "\"jumpHosts\":[],"
+                + "\"portForwardingRules\":[],"
+                + "\"useX11Forwarding\":false,"
+                + "\"sftpOnly\":false"
+                + "}]" 
+                + "},"
+                + "\"lastSelection\":\"legacy-host\""
+                + "}";
+        Path legacyJson = configDir.resolve("session-store.json");
+        Files.writeString(legacyJson, json);
+
+        VpsHostRepository repository = new VpsHostRepository();
+        repository.rebuildFromLegacyJson(legacyJson.toFile());
+
+        SavedSessionTree loaded = repository.loadTree();
+        assertEquals(1, loaded.getFolder().getItems().size());
+        SessionInfo info = loaded.getFolder().getItems().get(0);
+        assertEquals("legacy-host", info.getId());
+        assertEquals("Legacy Provider", info.getProvider());
+        assertEquals("https://legacy.example", info.getProviderUrl());
+        assertNull(info.getProviderId());
+        assertEquals(0, new VpsProviderRepository().listProviders().size());
+    }
+
+    public void testLoadTreeNormalizesTechnicalEmptyRoot() throws Exception {
+        Path configDir = Files.createTempDirectory("vps-ledger-empty-root");
+        App.getCONTEXT().setConfigDir(configDir.toFile());
+
+        SessionInfo info = new SessionInfo();
+        info.setId("host-1");
+        info.setName("alpha");
+        info.setHost("192.0.2.50");
+        info.setUser("root");
+
+        SessionFolder visibleRoot = new SessionFolder();
+        visibleRoot.setId("folder-visible");
+        visibleRoot.setName("My sites");
+        visibleRoot.getItems().add(info);
+
+        SessionFolder technicalRoot = new SessionFolder();
+        technicalRoot.setId("folder-empty-root");
+        technicalRoot.setName("Empty_Root");
+        technicalRoot.getFolders().add(visibleRoot);
+
+        new VpsHostRepository().saveTree(technicalRoot, info.getId(), false);
+
+        SavedSessionTree loaded = new VpsHostRepository().loadTree();
+        assertEquals("My sites", loaded.getFolder().getName());
+        assertEquals(1, loaded.getFolder().getItems().size());
+        assertEquals("alpha", loaded.getFolder().getItems().get(0).getName());
+    }
+
     public void testHostJsonDoesNotEmbedSshPassword() throws Exception {
         SessionInfo info = new SessionInfo();
         info.setId("host-password");
