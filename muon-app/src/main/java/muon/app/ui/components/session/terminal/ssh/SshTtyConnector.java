@@ -33,6 +33,7 @@ public class SshTtyConnector implements DisposableTtyConnector {
     private Session channel;
     private final AtomicBoolean isInitiated = new AtomicBoolean(false);
     private final AtomicBoolean isCancelled = new AtomicBoolean(false);
+    private final AtomicBoolean hasReceivedData = new AtomicBoolean(false);
     private final AtomicBoolean stopFlag = new AtomicBoolean(false);
     private Dimension myPendingTermSize;
     private Dimension myPendingPixelSize;
@@ -142,7 +143,11 @@ public class SshTtyConnector implements DisposableTtyConnector {
 
     @Override
     public int read(char[] buf, int offset, int length) throws IOException {
-        return myInputStreamReader.read(buf, offset, length);
+        int read = myInputStreamReader.read(buf, offset, length);
+        if (read > 0) {
+            hasReceivedData.set(true);
+        }
+        return read;
     }
 
     @Override
@@ -153,7 +158,8 @@ public class SshTtyConnector implements DisposableTtyConnector {
 
     @Override
     public boolean isConnected() {
-        return channel != null && channel.isOpen() && isInitiated.get();
+        return !isCancelled.get() && isInitiated.get() && wr != null && wr.isConnected()
+                && shell != null && shell.isOpen();
     }
 
     @Override
@@ -195,8 +201,13 @@ public class SshTtyConnector implements DisposableTtyConnector {
     }
 
     @Override
+    public boolean hasReceivedData() {
+        return hasReceivedData.get();
+    }
+
+    @Override
     public boolean isBusy() {
-        return channel.isOpen();
+        return channel != null && channel.isOpen();
     }
 
     @Override

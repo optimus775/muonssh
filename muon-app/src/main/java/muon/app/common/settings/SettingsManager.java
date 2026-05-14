@@ -26,8 +26,12 @@ public class SettingsManager {
         File file = new File(configDir, Constants.CONFIG_DB_FILE);
         if (file.exists()) {
             try {
-                return objectMapper.readValue(file, new TypeReference<>() {
+                Settings settings = objectMapper.readValue(file, new TypeReference<>() {
                 });
+                if (settings.normalizeTerminalPalette()) {
+                    saveMigratedSettings(file, settings);
+                }
+                return settings;
             } catch (IOException e) {
                 log.error("Error reading settings: {}", e.getMessage(), e);
             }
@@ -41,6 +45,14 @@ public class SettingsManager {
             objectMapper.writeValue(file, App.getGlobalSettings());
         } catch (IOException e) {
             log.error("Error saving settings: {}", e.getMessage(), e);
+        }
+    }
+
+    private void saveMigratedSettings(File file, Settings settings) {
+        try {
+            objectMapper.writeValue(file, settings);
+        } catch (IOException e) {
+            log.error("Error saving migrated settings: {}", e.getMessage(), e);
         }
     }
 }

@@ -32,6 +32,8 @@ public class SessionListPanel extends JPanel {
     @Getter
     private final JList<ISessionContentPanel> sessionList;
     private final AppWindow window;
+    private ISessionContentPanel activeSession;
+    private ISessionContentPanel activeSessionOnMousePress;
 
     // Resizing config
     private final int minWidthPx = scale(170);
@@ -42,7 +44,15 @@ public class SessionListPanel extends JPanel {
         super(new BorderLayout());
         this.window = window;
         sessionListModel = new DefaultListModel<>();
-        sessionList = new JList<>(sessionListModel);
+        sessionList = new JList<>(sessionListModel) {
+            @Override
+            protected void processMouseEvent(MouseEvent e) {
+                if (e.getID() == MouseEvent.MOUSE_PRESSED && SwingUtilities.isLeftMouseButton(e)) {
+                    activeSessionOnMousePress = activeSession;
+                }
+                super.processMouseEvent(e);
+            }
+        };
         sessionList.setCursor(DEFAULT_CURSOR);
         sessionList.setCellRenderer(new SessionListRenderer());
 
@@ -131,7 +141,16 @@ public class SessionListPanel extends JPanel {
                     removeSession(index);
                     return;
                 }
-                openSessionManager(index);
+                ISessionContentPanel clickedSession = sessionListModel.get(index);
+                if (clickedSession == activeSessionOnMousePress) {
+                    openSessionManager(index);
+                } else {
+                    if (sessionList.getSelectedIndex() != index) {
+                        sessionList.setSelectedIndex(index);
+                    }
+                    selectSession(index);
+                }
+                activeSessionOnMousePress = null;
             }
 
             @Override
@@ -189,7 +208,15 @@ public class SessionListPanel extends JPanel {
     }
 
     public void selectSession(int index) {
-        window.showSession(sessionListModel.get(index));
+        if (index < 0 || index >= sessionListModel.size()) {
+            return;
+        }
+        ISessionContentPanel sessionContentPanel = sessionListModel.get(index);
+        if (sessionContentPanel == activeSession) {
+            return;
+        }
+        activeSession = sessionContentPanel;
+        window.showSession(sessionContentPanel);
         window.revalidate();
         window.repaint();
     }
@@ -221,15 +248,23 @@ public class SessionListPanel extends JPanel {
             window.removeSession(sessionContentPanel);
             window.revalidate();
             window.repaint();
+            if (sessionContentPanel == activeSession) {
+                activeSession = null;
+            }
+            if (sessionContentPanel == activeSessionOnMousePress) {
+                activeSessionOnMousePress = null;
+            }
             sessionListModel.remove(index);
             if (sessionListModel.isEmpty()) {
+                activeSession = null;
+                activeSessionOnMousePress = null;
                 return true;
             }
-            if (index == sessionListModel.size()) {
-                sessionList.setSelectedIndex(index - 1);
-            } else {
-                sessionList.setSelectedIndex(index);
+            int nextIndex = index == sessionListModel.size() ? index - 1 : index;
+            if (sessionList.getSelectedIndex() != nextIndex) {
+                sessionList.setSelectedIndex(nextIndex);
             }
+            selectSession(nextIndex);
             return true;
         }
         return false;

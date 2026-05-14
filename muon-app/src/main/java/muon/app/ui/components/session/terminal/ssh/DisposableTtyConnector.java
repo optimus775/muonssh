@@ -11,6 +11,8 @@ public interface DisposableTtyConnector extends TtyConnector {
 
     boolean isRunning();
 
+    boolean hasReceivedData();
+
     int getExitStatus();
 
     boolean isInitialized();

@@ -43,7 +43,7 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
     private final JLabel reconnectLabel;
     private final JButton btnReconnect;
     private final ScheduledExecutorService reconnectExecutor;
-    private ScheduledFuture<?> reconnectFuture;
+    private volatile ScheduledFuture<?> reconnectFuture;
     private final AtomicInteger reconnectAttempt = new AtomicInteger(0);
     private final AtomicBoolean reconnectScheduled = new AtomicBoolean(false);
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -154,16 +154,20 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
                 TimeUnit.SECONDS);
     }
 
-    private void scheduleReconnectCheck() {
+    private void scheduleReconnectCheck(DisposableTtyConnector checkedTty) {
         reconnectFuture = reconnectExecutor.schedule(() -> {
             if (closed.get()) {
                 return;
             }
-            boolean connected = tty != null && tty.isConnected();
-            if (connected) {
+            if (checkedTty != tty) {
+                return;
+            }
+            if (isConnectorUsable(checkedTty)) {
                 reconnectAttempt.set(0);
                 reconnectScheduled.set(false);
                 SwingUtilities.invokeLater(this::hideReconnectBanner);
+            } else if (term.isSessionRunning() && !checkedTty.isCancelled()) {
+                scheduleReconnectCheck(checkedTty);
             } else {
                 reconnectScheduled.set(false);
                 scheduleAutoReconnect();
@@ -175,17 +179,34 @@ public class TerminalComponent extends JPanel implements ClosableTabContent {
         if (closed.get()) {
             return;
         }
+        if (isConnectorUsable(tty)) {
+            reconnectAttempt.set(0);
+            reconnectScheduled.set(false);
+            hideReconnectBanner();
+            return;
+        }
+        if (term.isSessionRunning() && tty != null && !tty.isCancelled()) {
+            reconnectScheduled.set(true);
+            showReconnectBanner("Reconnecting...");
+            scheduleReconnectCheck(tty);
+            return;
+        }
         if (reconnectFuture != null) {
             reconnectFuture.cancel(false);
         }
         reconnectScheduled.set(true);
         showReconnectBanner("Reconnecting...");
-        tty = new SshTtyConnector(info, initialCommand, sessionContentPanel);
-        term.setTtyConnector(tty);
+        DisposableTtyConnector reconnectTty = new SshTtyConnector(info, initialCommand, sessionContentPanel);
+        tty = reconnectTty;
+        term.setTtyConnector(reconnectTty);
         term.getTerminal().setCursorVisible(true);
         syncTtySize();
         term.start();
-        scheduleReconnectCheck();
+        scheduleReconnectCheck(reconnectTty);
+    }
+
+    private boolean isConnectorUsable(DisposableTtyConnector connector) {
+        return connector != null && !connector.isCancelled() && connector.hasReceivedData();
     }
 
     private void showReconnectBanner(String message) {

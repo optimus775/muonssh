@@ -26,6 +26,16 @@ public class Settings {
     public static final String PASTE_KEY = "Paste";
     public static final String CLEAR_BUFFER = "Clear buffer";
     public static final String FIND_KEY = "Find";
+    public static final int ANSI_RED = 0xff6b6b;
+    public static final int ANSI_BRIGHT_RED = 0xffb4ab;
+    private static final int LEGACY_ANSI_RED = 0xcd0000;
+    private static final int LEGACY_ANSI_BRIGHT_RED = 0xff0000;
+    private static final int PALETTE_COLOR_COUNT = 16;
+    private static final int[] DEFAULT_PALLETE_COLORS = {
+            0x000000, ANSI_RED, 0x00cd00, 0xcdcd00, 0x1e90ff, 0xcd00cd, 0x00cdcd, 0xe5e5e5,
+            0x4c4c4c, ANSI_BRIGHT_RED, 0x00ff00, 0xffff00, 0x4682b4, 0xff00ff, 0x00ffff, 0xffffff
+    };
+
     private boolean usingMasterPassword = false;
     private TransferMode fileTransferMode = TransferMode.BACKGROUND;
     private ConflictAction conflictAction = ConflictAction.AUTORENAME;
@@ -64,8 +74,7 @@ public class Settings {
     private Language language = Language.ENGLISH;
     private String terminalTheme = "Dark";
     private String terminalPalette = "xterm";
-    private int[] palleteColors = {0x000000, 0xcd0000, 0x00cd00, 0xcdcd00, 0x1e90ff, 0xcd00cd, 0x00cdcd, 0xe5e5e5,
-                                   0x4c4c4c, 0xff0000, 0x00ff00, 0xffff00, 0x4682b4, 0xff00ff, 0x00ffff, 0xffffff};
+    private int[] palleteColors = defaultPalleteColors();
     private int backgroundTransferQueueSize = 2;
     private int defaultColorFg = DarkTerminalTheme.DEF_FG;
     private int defaultColorBg = DarkTerminalTheme.DEF_BG;
@@ -150,6 +159,46 @@ public class Settings {
                 conflictAction = ConflictAction.SKIP;
                 break;
         }
+    }
+
+    public static int[] defaultPalleteColors() {
+        return DEFAULT_PALLETE_COLORS.clone();
+    }
+
+    public boolean normalizeTerminalPalette() {
+        boolean changed = ensurePaletteSize();
+
+        changed |= replaceLegacyPaletteColor(1, LEGACY_ANSI_RED, ANSI_RED);
+        changed |= replaceLegacyPaletteColor(9, LEGACY_ANSI_BRIGHT_RED, ANSI_BRIGHT_RED);
+
+        return changed;
+    }
+
+    private boolean ensurePaletteSize() {
+        if (palleteColors != null && palleteColors.length == PALETTE_COLOR_COUNT) {
+            return false;
+        }
+
+        int[] normalizedColors = defaultPalleteColors();
+        if (palleteColors != null) {
+            System.arraycopy(palleteColors, 0, normalizedColors, 0,
+                             Math.min(palleteColors.length, normalizedColors.length));
+        }
+        palleteColors = normalizedColors;
+        return true;
+    }
+
+    private boolean replaceLegacyPaletteColor(int index, int legacyRgb, int replacementRgb) {
+        if (!sameRgb(palleteColors[index], legacyRgb)) {
+            return false;
+        }
+
+        palleteColors[index] = replacementRgb;
+        return true;
+    }
+
+    private static boolean sameRgb(int value, int rgb) {
+        return (value & 0x00ffffff) == rgb;
     }
 
 }
