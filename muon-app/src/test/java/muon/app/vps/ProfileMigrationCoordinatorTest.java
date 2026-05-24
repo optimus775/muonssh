@@ -224,15 +224,17 @@ public class ProfileMigrationCoordinatorTest extends TestCase {
         assertTrue(shownMessage.get().contains("Secret Service is not available"));
     }
 
-    public void testRunIfNeededShowsMeaningfulErrorWhenExceptionMessageIsMissing() throws Exception {
-        Path configDir = Files.createTempDirectory("migration-coordinator-error-message");
+    public void testInitialInfisicalPushFailureDoesNotStopMigration() throws Exception {
+        Path configDir = Files.createTempDirectory("migration-coordinator-push-failure");
         App.getCONTEXT().setConfigDir(configDir.toFile());
         App.getCONTEXT().setSettingsManager(new SettingsManager(configDir.toFile()));
         App.getCONTEXT().setSettings(new Settings());
 
         writeLegacySessionStore(configDir);
+        writeLegacyPasswords(configDir);
 
         AtomicReference<String> shownMessage = new AtomicReference<>();
+        AtomicBoolean pushAttempted = new AtomicBoolean(false);
         ProfileMigrationCoordinator coordinator = new ProfileMigrationCoordinator(
                 new VpsHostRepository(),
                 new ProfileMigrationCoordinator.MigrationPrompt() {
@@ -247,13 +249,17 @@ public class ProfileMigrationCoordinatorTest extends TestCase {
                     }
                 },
                 localUpdatedAt -> {
+                    pushAttempted.set(true);
                     throw new IllegalStateException();
                 });
 
-        assertFalse(coordinator.runIfNeeded());
-        assertNotNull(shownMessage.get());
-        assertTrue(shownMessage.get().contains("IllegalStateException"));
-        assertFalse(shownMessage.get().endsWith("null"));
+        assertTrue(coordinator.runIfNeeded());
+        assertTrue(pushAttempted.get());
+        assertNull(shownMessage.get());
+
+        VpsHostRepository repository = new VpsHostRepository();
+        assertNotNull(repository.getAppStateValue(ProfileMigrationCoordinator.COMPLETED_AT_KEY));
+        assertNotNull(repository.getAppStateValue(InfisicalSyncService.LOCAL_STATE_UPDATED_AT_KEY));
     }
 
     private ProfileMigrationCoordinator.MigrationInput buildInput(ProfileMigrationCoordinator.MigrationInput defaults,

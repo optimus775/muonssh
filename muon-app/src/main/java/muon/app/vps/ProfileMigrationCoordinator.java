@@ -77,7 +77,7 @@ public class ProfileMigrationCoordinator {
     public ProfileMigrationCoordinator() {
         this(new VpsHostRepository(),
              new SwingMigrationPrompt(),
-             localUpdatedAt -> new InfisicalSyncService().pushLocalStateNow(localUpdatedAt));
+             ProfileMigrationCoordinator::pushLocalStateInBackground);
     }
 
     ProfileMigrationCoordinator(VpsHostRepository hostRepository,
@@ -110,17 +110,37 @@ public class ProfileMigrationCoordinator {
             String archivedPasswordStore = passwordStore.backupLegacyStoreIfPresent();
             applySettings(input, passwordStore);
             long localUpdatedAt = System.currentTimeMillis();
-            initialPushAction.push(localUpdatedAt);
             hostRepository.saveAppStateValue(InfisicalSyncService.LOCAL_STATE_UPDATED_AT_KEY, String.valueOf(localUpdatedAt));
             hostRepository.saveAppStateValue(COMPLETED_AT_KEY, String.valueOf(System.currentTimeMillis()));
             hostRepository.saveAppStateValue(SOURCE_KEY, fileState.legacyJsonPath.toString());
             hostRepository.saveAppStateValue(ARCHIVED_DB_KEY, archivedDatabase == null ? "" : archivedDatabase);
             hostRepository.saveAppStateValue(ARCHIVED_PASSWORD_STORE_KEY, archivedPasswordStore == null ? "" : archivedPasswordStore);
+            startInitialPush(localUpdatedAt);
             return true;
         } catch (Exception e) {
             log.error("4.0.0 profile migration failed", e);
             prompt.showError("Migration failed", "Unable to migrate the MuonSSH profile: " + describeException(e));
             return false;
+        }
+    }
+
+    private static void pushLocalStateInBackground(long localUpdatedAt) {
+        Thread thread = new Thread(() -> {
+            try {
+                new InfisicalSyncService().pushLocalStateNow(localUpdatedAt);
+            } catch (Exception e) {
+                log.warn("Initial Infisical push failed; continuing with the local migrated profile", e);
+            }
+        }, "infisical-initial-push");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void startInitialPush(long localUpdatedAt) {
+        try {
+            initialPushAction.push(localUpdatedAt);
+        } catch (Exception e) {
+            log.warn("Initial Infisical push failed; continuing with the local migrated profile", e);
         }
     }
 
@@ -297,7 +317,7 @@ public class ProfileMigrationCoordinator {
             description.setWrapStyleWord(true);
             description.setOpaque(false);
             description.setText("MuonSSH " + MIGRATION_VERSION + " will rebuild the local VPS Ledger from session-store.json "
-                    + "and push your servers, keys, and secrets to Infisical before the application starts.\n\n"
+                    + "using local data first. Infisical settings are optional and sync runs in the background when configured.\n\n"
                     + "Cancel stops the upgrade now. The wizard will open again on the next launch.");
             add(description, BorderLayout.NORTH);
 
@@ -318,7 +338,7 @@ public class ProfileMigrationCoordinator {
             add(form, BorderLayout.CENTER);
 
             JButton btnCancel = new JButton("Cancel");
-            JButton btnContinue = new JButton("Migrate and Push");
+            JButton btnContinue = new JButton("Migrate");
             btnCancel.addActionListener(e -> {
                 result = null;
                 dispose();
@@ -387,29 +407,7 @@ public class ProfileMigrationCoordinator {
         }
 
         private String validate(MigrationInput input) {
-            if (isBlank(input.infisicalBaseUrl)) {
-                return "Infisical base URL is required.";
-            }
-            if (isBlank(input.infisicalProjectId)) {
-                return "Infisical project ID is required.";
-            }
-            if (isBlank(input.infisicalEnvironment)) {
-                return "Infisical environment is required.";
-            }
-            if (isBlank(input.infisicalSecretBasePath)) {
-                return "Infisical secret base path is required.";
-            }
-            if (isBlank(input.infisicalClientId)) {
-                return "Infisical client ID is required.";
-            }
-            if (isBlank(input.infisicalClientSecret)) {
-                return "Infisical client secret is required.";
-            }
             return null;
-        }
-
-        private boolean isBlank(String value) {
-            return value == null || value.trim().isEmpty();
         }
     }
 }

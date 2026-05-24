@@ -105,13 +105,14 @@ public final class App {
         registerShutdownHook();
         externalEditorHandler = new ExternalEditorHandler(mw);
         SwingUtilities.invokeLater(() -> mw.setVisible(true));
-        infisicalSyncService.start();
 
         if (App.getGlobalSettings().isStartWithTerminal()) {
             mw.createLocalSessionPanel();
         } else {
             mw.createFirstSessionPanel();
         }
+
+        infisicalSyncService.start();
     }
 
     private static void setKnownHostFile() {

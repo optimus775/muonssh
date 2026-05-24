@@ -1,3 +1,9 @@
+# КРИТИЧЕСКОЕ ПРАВИЛО: INFISICAL НЕ БЛОКИРУЕТ ПРИЛОЖЕНИЕ
+
+- Недоступность, таймауты, ошибки авторизации или любая другая проблема Infisical НИКОГДА не должны блокировать запуск, миграцию профиля, загрузку сессий или основную работу MuonSSH.
+- Любая синхронизация с Infisical должна быть только best-effort и/или фоновой: ошибка допустима только как лог/статус, но не как причина закрыть приложение, остановить загрузку или запретить работу с локальными данными.
+- Локальная SQLite-база и локальные секреты являются рабочим источником данных; Infisical является внешней синхронизацией поверх них.
+
 # MuonSSH Agent Instructions
 
 - When the user says "запусти" or "run it", start the app and leave it running for manual testing. Do not use `timeout`, do not auto-stop it, and do not treat "run" as a short smoke test unless the user explicitly asks for a temporary run.

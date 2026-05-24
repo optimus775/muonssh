@@ -441,7 +441,7 @@ public class AppWindow extends JFrame {
         b1.add(createRepositoryLabel());
         b1.add(Box.createHorizontalGlue());
 
-        lblInfisicalStatus = new JLabel("Infisical: syncing...");
+        lblInfisicalStatus = new JLabel("Infisical: idle");
         b1.add(lblInfisicalStatus);
         b1.add(createSpacer(10, 10));
 
@@ -682,7 +682,7 @@ public class AppWindow extends JFrame {
     public void setInfisicalStatus(String statusText) {
         if (lblInfisicalStatus != null) {
             lblInfisicalStatus.setText(statusText == null || statusText.isBlank()
-                    ? "Infisical: syncing..."
+                    ? "Infisical: idle"
                     : statusText);
         }
     }
