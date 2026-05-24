@@ -34,20 +34,6 @@ public class SessionStore {
 
     public static synchronized SavedSessionTree load() {
         SavedSessionTree savedSessionTree = VPS_HOST_REPOSITORY.loadTree();
-        try {
-            log.debug("Loading passwords...");
-            PasswordStore passwordStore = PasswordStore.getSharedInstance();
-            passwordStore.populatePassword(savedSessionTree);
-            if (passwordStore.consumePlaintextScrubNeeded() && savedSessionTree != null && savedSessionTree.getFolder() != null) {
-                VPS_HOST_REPOSITORY.saveTree(savedSessionTree.getFolder(), savedSessionTree.getLastSelection());
-            }
-            log.debug("Loading passwords... done");
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
-            JOptionPane.showMessageDialog(App.getAppWindow(),
-                                          String.format(App.getCONTEXT().getBundle().getString("error_occurred"), e.getMessage()), App.getCONTEXT().getBundle().getString("error"), JOptionPane.ERROR_MESSAGE);
-            return null;
-        }
         return savedSessionTree;
     }
 

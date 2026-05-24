@@ -15,6 +15,7 @@ import muon.app.ui.components.settings.EditorEntry;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 import static java.util.Map.entry;
 
@@ -277,6 +278,60 @@ public class PlatformUtils {
         int exitCode = process.waitFor();
         log.debug("Executed [{}] with exit code: {}", command, exitCode);
         return exitCode;
+    }
+
+    public static int executeLocalCommand(String command, StringBuilder output, long timeout, TimeUnit unit)
+            throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
+
+        if (IS_WINDOWS) {
+            pb = new ProcessBuilder("cmd", "/c", command);
+        }
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        ExecutorService readerExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "local-command-output-reader");
+            thread.setDaemon(true);
+            return thread;
+        });
+        Future<?> reader = readerExecutor.submit(() -> {
+            try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = bufferedReader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+
+        try {
+            if (!process.waitFor(timeout, unit)) {
+                process.destroy();
+                if (!process.waitFor(250, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly();
+                }
+                reader.cancel(true);
+                log.warn("Command timed out after {} {}: {}", timeout, unit, command);
+                return -1;
+            }
+            try {
+                reader.get(250, TimeUnit.MILLISECONDS);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof UncheckedIOException) {
+                    throw ((UncheckedIOException) cause).getCause();
+                }
+                throw new IOException("Unable to read command output", cause);
+            } catch (TimeoutException e) {
+                reader.cancel(true);
+            }
+            int exitCode = process.exitValue();
+            log.debug("Executed [{}] with exit code: {}", command, exitCode);
+            return exitCode;
+        } finally {
+            readerExecutor.shutdownNow();
+        }
     }
 
 }

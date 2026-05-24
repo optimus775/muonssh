@@ -1056,6 +1056,9 @@ public class SessionInfoPanel extends JPanel {
             }
 
             private void updatePassword() {
+                if (info == null || suppressChangeEvents) {
+                    return;
+                }
                 info.setProxyPassword(new String(inpProxyPassword.getPassword()));
                 notifyChange();
             }
@@ -1368,6 +1371,9 @@ public class SessionInfoPanel extends JPanel {
             }
 
             private void updatePassword() {
+                if (info == null || suppressChangeEvents) {
+                    return;
+                }
                 info.setPassword(new String(inpPassword.getPassword()));
                 notifyChange();
             }

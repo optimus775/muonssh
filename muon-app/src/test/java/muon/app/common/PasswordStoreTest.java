@@ -108,6 +108,25 @@ public class PasswordStoreTest extends TestCase {
         assertEquals("session-secret", result.getValue());
     }
 
+    public void testSavePasswordsPreservesUnloadedNullSessionSecrets() throws Exception {
+        Path configDir = Files.createTempDirectory("password-store-preserve-null");
+        App.getCONTEXT().setConfigDir(configDir.toFile());
+        App.getCONTEXT().setSettingsManager(new SettingsManager(configDir.toFile()));
+        App.getCONTEXT().setSettings(new Settings());
+
+        PasswordStore store = PasswordStore.getSharedInstance();
+        String alias = SecretAliases.sshPassword("host-with-secret");
+        store.saveSecretToSystemStore(alias, "existing-secret");
+
+        SavedSessionTree tree = createTree("host-with-secret");
+        store.savePasswords(tree);
+        assertEquals("existing-secret", store.getSecretWithoutPrompt(alias).getValue());
+
+        tree.getFolder().getItems().get(0).setPassword("");
+        store.savePasswords(tree);
+        assertEquals(PasswordStore.SecretReadStatus.MISSING, store.getSecretWithoutPrompt(alias).getStatus());
+    }
+
     private void writeLegacyPasswords(Path configDir) throws Exception {
         LegacyPkcs12SecretStore legacyStore = new LegacyPkcs12SecretStore(configDir.toFile());
         legacyStore.unlock(new char[0]);

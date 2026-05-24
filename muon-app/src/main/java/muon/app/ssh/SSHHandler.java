@@ -3,6 +3,7 @@ package muon.app.ssh;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import muon.app.App;
+import muon.app.common.PasswordStore;
 import muon.app.ui.components.common.SkinnedTextField;
 import muon.app.ui.components.session.HopEntry;
 import muon.app.ui.components.session.SessionContentPanel;
@@ -169,8 +170,17 @@ public class SSHHandler implements Closeable {
     }
 
     public void connect() throws IOException, OperationCancelledException {
+        loadSavedPasswords();
         Deque<HopEntry> hopStack = new ArrayDeque<>(this.info.getJumpHosts());
         this.connect(hopStack);
+    }
+
+    private void loadSavedPasswords() {
+        try {
+            PasswordStore.getSharedInstance().populatePassword(this.info);
+        } catch (Exception e) {
+            log.error("Unable to load saved passwords for session {}", this.info == null ? null : this.info.getName(), e);
+        }
     }
 
     private void connect(Deque<HopEntry> hopStack) throws IOException, OperationCancelledException {

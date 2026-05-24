@@ -20,7 +20,12 @@ import static muon.app.util.ScalingUtil.scale;
 @Slf4j
 public class KubeContextSelectorPanel extends JPanel {
 
-    private final transient ScheduledExecutorService k8sContextUpdater = Executors.newSingleThreadScheduledExecutor();
+    private final transient ScheduledExecutorService k8sContextUpdater = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "k8s-context-updater");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final long COMMAND_TIMEOUT_SECONDS = 3;
 
     private final Box verticalBox;
     @Getter
@@ -154,7 +159,7 @@ public class KubeContextSelectorPanel extends JPanel {
         String output = "";
         try {
             StringBuilder sb = new StringBuilder();
-            int exitCode = PlatformUtils.executeLocalCommand(command, sb);
+            int exitCode = PlatformUtils.executeLocalCommand(command, sb, COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (exitCode == 0) {
                 output = sb.toString().trim();
                 log.debug("Local K8s response:\n{}", output);
@@ -169,19 +174,18 @@ public class KubeContextSelectorPanel extends JPanel {
 
 
     private void startK8sContextUpdater() {
-        AtomicReference<String> context = new AtomicReference<>(executeK8sCommands("kubectl config current-context"));
-        if (context.get() == null || context.get().isEmpty()) {
-            log.error("Error uploading K8s context pluging");
-            return;
-        }
-
-        commandWorking = true;
+        AtomicReference<String> context = new AtomicReference<>("");
         // Periodically refresh the current K8s context and show it in the main window label
-        k8sContextUpdater.scheduleAtFixedRate(() -> {
+        k8sContextUpdater.scheduleWithFixedDelay(() -> {
             context.set(executeK8sCommands("kubectl config current-context"));
+            if (context.get() == null || context.get().isEmpty()) {
+                commandWorking = false;
+                return;
+            }
+            commandWorking = true;
             currentContext = context.get();
-            if (App.getAppWindow().getLblK8sContext() != null) {
-                App.getAppWindow().getLblK8sContext().setText(context.get());
+            if (App.getAppWindow() != null && App.getAppWindow().getLblK8sContext() != null) {
+                SwingUtilities.invokeLater(() -> App.getAppWindow().getLblK8sContext().setText(context.get()));
             }
             log.info("Auto-updating local K8s context: {}", context);
         }, 0, 30, TimeUnit.SECONDS);

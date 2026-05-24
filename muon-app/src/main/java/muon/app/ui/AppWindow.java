@@ -80,7 +80,9 @@ public class AppWindow extends JFrame {
         this.add(createSessionPanel(), BorderLayout.WEST);
         this.add(this.cardPanel);
 
-        this.kubeContextSelectorPanel = new KubeContextSelectorPanel();
+        this.kubeContextSelectorPanel = App.getGlobalSettings().isEnabledK8sContextPlugin()
+                ? new KubeContextSelectorPanel()
+                : null;
         this.bottomPanel = createBottomPanel();
         this.add(this.bottomPanel, BorderLayout.SOUTH);
 
@@ -445,7 +447,7 @@ public class AppWindow extends JFrame {
         b1.add(lblInfisicalStatus);
         b1.add(createSpacer(10, 10));
 
-        if (App.getGlobalSettings().isEnabledK8sContextPlugin() && kubeContextSelectorPanel.isCommandWorking()) {
+        if (App.getGlobalSettings().isEnabledK8sContextPlugin() && kubeContextSelectorPanel != null) {
             createK8sLabel(kubeContextSelectorPanel.getCurrentContext());
             b1.add(lblK8sContext);
             b1.add(createSpacer(5, 15));

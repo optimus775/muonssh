@@ -367,7 +367,7 @@ public final class PasswordStore {
         }
     }
 
-    private void populatePassword(SessionInfo info) {
+    public synchronized void populatePassword(SessionInfo info) {
         if (info == null || info.getId() == null || info.getId().isBlank()) {
             return;
         }
@@ -417,18 +417,25 @@ public final class PasswordStore {
             if (info.getId() == null || info.getId().isBlank()) {
                 info.setId(UUID.randomUUID().toString());
             }
-            saveSecret(store, SecretAliases.sshPassword(info.getId()), info.getPassword());
-            saveSecret(store, SecretAliases.proxyPassword(info.getId()), info.getProxyPassword());
+            saveLoadedSecret(store, SecretAliases.sshPassword(info.getId()), info.getPassword());
+            saveLoadedSecret(store, SecretAliases.proxyPassword(info.getId()), info.getProxyPassword());
             for (HopEntry hop : info.getJumpHosts()) {
                 if (hop.getId() == null || hop.getId().isBlank()) {
                     hop.setId(UUID.randomUUID().toString());
                 }
-                saveSecret(store, SecretAliases.jumpPassword(info.getId(), hop.getId()), hop.getPassword());
+                saveLoadedSecret(store, SecretAliases.jumpPassword(info.getId(), hop.getId()), hop.getPassword());
             }
         }
         for (SessionFolder f : folder.getFolders()) {
             savePassword(f, store);
         }
+    }
+
+    private void saveLoadedSecret(SecretStore store, String alias, String value) throws Exception {
+        if (value == null) {
+            return;
+        }
+        saveSecret(store, alias, value);
     }
 
     private void saveSecret(SecretStore store, String alias, String value) throws Exception {
